@@ -19,7 +19,6 @@ COURSE_HEADER = "../h2[{index}]"
 EXPAND_BTN = "//button[@class='btn_expandAll]"
 COURSE = "//div[@class='courseblock]"
 
-# Open Nextdoor
 browser = webdriver.Chrome()
 browser.get("http://guide.berkeley.edu/courses/")
 
