@@ -1,8 +1,31 @@
-# TODO
-# Get links using bs4 instead of Selenium 
+# COURSE DIRECTORY EXAMPLE:
+# <div id="atozindex">
+#   <h2 class="letternav-head" id="A">...</h2>
+#   <ul>
+#       <li>
+#           <a href="/courses/x">...</a>
+#       </li>
+#   </ul>
+#   ...
+# </div>
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
+# COURSE BLOCK EXAMPLE:
+# <div class="courseblock">
+#   ...
+#       <h3 class="courseblocktitle">
+#           <span class="code">...</span>
+#           <span class="title">...</span>
+#           <span class="hours">...</span>
+#       </h3>
+#   <div class="coursebody"...>
+#       <div class="coursedetails"...>
+#           <div class="course-section">
+#               ...
+#               <p>...</p>
+#           </div>
+#       </div>
+#   </div>
+# </div>
 
 from bs4 import BeautifulSoup
 
@@ -30,33 +53,35 @@ db = mysql.connector.connect(
 )
 cursor = db.cursor()
 
-# The indices are NOT 0 indexed, they are 1 indexed instead 
-COURSE_ALPHA =  "//div[@id='atozindex']/ul"
-COURSE_CATEGORIES = "./li/a"
-COURSE_HEADER = "../h2[{index}]"
+# Remove letters to skip them 
+LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
-EXPAND_BTN = "//button[@class='btn_expandAll]"
-COURSE = "//div[@class='courseblock]"
-
-browser = webdriver.Chrome()
-browser.get("http://guide.berkeley.edu/courses/")
+DIR_URL = "http://guide.berkeley.edu/courses/"
+ROOT_URL = "http://guide.berkeley.edu"
+SCHOOL_YEAR = 2021
 
 linksDict = {}
-alphas = browser.find_elements(By.XPATH, COURSE_ALPHA)
-for i in range(len(alphas)):
-    id = alphas[i].find_element(By.XPATH, COURSE_HEADER.format(index=i+1)).get_attribute('id')
-    categories = alphas[i].find_elements(By.XPATH, COURSE_CATEGORIES)
+# Get the directory page 
+dirReq = requests.get(DIR_URL)
+soup = BeautifulSoup(dirReq.content, 'html.parser')
+atoz = soup.find('div', {'id':'atozindex'})
+categoryGroups = atoz.find_all('ul')
+alphas = atoz.find_all('h2')
+for i in range(len(categoryGroups)):
+    alpha = alphas[i].get('id')
     links = []
+    categories = categoryGroups[i].find_all('a')
     for category in categories:
-        links.append(category.get_attribute('href'))
-    linksDict[id] = links
-
-browser.quit()
+        links.append(category.get('href'))
+    linksDict[alpha] = links
+print(linksDict)
 
 for key in linksDict:
+    if key not in LETTERS:
+        continue
     for link in linksDict[key]:
-        req = requests.get(link)
-        soup = BeautifulSoup(req.content, 'html.parser')
+        linkReq = requests.get(ROOT_URL + link)
+        soup = BeautifulSoup(linkReq.content, 'html.parser')
         
         # Gets the container for all of the courses 
         courses = soup.find_all('div', {'class':'courseblock'})
@@ -85,11 +110,11 @@ for key in linksDict:
             spring  = False
             summer  = False
             
-            if "fall 2021" in descriptions[0].lower():
+            if f"fall {SCHOOL_YEAR}" in descriptions[0].lower():
                 fall = True
-            if "spring 2022" in descriptions[0].lower():
+            if f"spring {SCHOOL_YEAR + 1}" in descriptions[0].lower():
                 spring = True
-            if "summer 2022" in descriptions[0].lower():
+            if f"summer {SCHOOL_YEAR + 1}" in descriptions[0].lower():
                 summer = True
             description = descriptions[1]
 
@@ -132,8 +157,16 @@ for key in linksDict:
                         grading = details[i].getText()[len(subHeading) + 1:][:-2].lower()
             print(f"fullCode: {fullCode} | code1: {code1} | code2: {code2} | title: {title} | description: {description} | units: {units} | subject: {subject} | level: {level} | fall: {fall} | spring: {spring} | summer: {summer} | grading: {grading} | final: {final}")
             
-            cursor.execute("""INSERT IGNORE INTO courses 
-                            (fullCode, code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final) 
-                            VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""", 
-                            (fullCode, code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final))
+            cursor.execute("""INSERT INTO courses
+                            (full_code, code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final) 
+                            VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE description=%s and units=%s and subject=%s and level=%s and fall=%s and spring=%s and summer=%s and grading=%s and final=%s""", 
+                            (fullCode, code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final,
+                            description, units, subject, level, fall, spring, summer, grading, final))
             db.commit()
+            if prereqs != None:
+                cursor.execute("""INSERT INTO prereqs (course_code, prereq) VALUES(%s, %s)
+                                ON DUPLICATE KEY UPDATE prereq=%s""", 
+                                (fullCode, prereqs, 
+                                prereqs))
+                db.commit()
