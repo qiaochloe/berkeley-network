@@ -91,8 +91,9 @@ for key in linksDict:
 
             # code1 is the prefix, such as AEROSPC and code2 is the actual code, such as 1A
             fullCode = basicInfo.find('span', {'class':'code'}).getText()
-            code1 = fullCode[:fullCode.index('\u00a0')].lower()
-            code2 = fullCode[fullCode.index('\u00a0') + 1:].lower()
+            fullCode = fullCode.replace('\u00a0', ' ')
+            code1 = fullCode[:fullCode.index(' ')].lower()
+            code2 = fullCode[fullCode.index(' ') + 1:].lower()
 
             # title is not processed 
             title = basicInfo.find('span', {'class':'title'}).getText()
@@ -107,8 +108,8 @@ for key in linksDict:
             
             # Set to false to avoid errors later 
             fall = False
-            spring  = False
-            summer  = False
+            spring = False
+            summer = False
             
             if f"fall {SCHOOL_YEAR}" in descriptions[0].lower():
                 fall = True
@@ -116,7 +117,13 @@ for key in linksDict:
                 spring = True
             if f"summer {SCHOOL_YEAR + 1}" in descriptions[0].lower():
                 summer = True
-            description = descriptions[1]
+            
+            # Some older courses have two line breaks, with a blank line between them and this fixed that 
+            if descriptions[1] == '':
+                description = descriptions[2]
+            else:
+                description = descriptions[1]
+            #print(f"{fullCode}: {descriptions}")
 
             # Set variables to None to avoid problems later 
             prereqs = None
@@ -142,27 +149,31 @@ for key in linksDict:
                     # level = 'undergraduate'
                     elif subHeading == "Subject/Course Level:":
                         temp = details[i].getText()[len(subHeading) + 1:]
-                        subject = temp[:temp.index('/')].lower()
-                        level = temp[temp.index('/') + 1:].lower()
+                        subject = temp[:temp.rindex('/')].lower()
+                        level = temp[temp.rindex('/') + 1:].lower()
                     # Example: 'Grading/Final exam status: Letter grade. Final exam required.'
                     # grading = 'letter grade' 
                     # final = 'final exam required'
                     elif subHeading == "Grading/Final exam status:":
                         temp = details[i].getText()[len(subHeading) + 1:]
-                        grading = temp[:temp.index('.')].lower()
-                        final = temp[temp.index('.') + 2:-2].lower()
+                        # The easiest way to check if only a final is listed. From what I've seen, if there is one period it's only talking about the final 
+                        if temp.count('.') == 1:
+                            final = temp[:-2].lower()
+                        else:
+                            grading = temp[:temp.index('.')].lower()
+                            final = temp[temp.index('.') + 2:-2].lower()
                     # Example: Grading: Letter grade.
                     # grading = letter grade
                     elif subHeading == "Grading:":
                         grading = details[i].getText()[len(subHeading) + 1:][:-2].lower()
-            print(f"fullCode: {fullCode} | code1: {code1} | code2: {code2} | title: {title} | description: {description} | units: {units} | subject: {subject} | level: {level} | fall: {fall} | spring: {spring} | summer: {summer} | grading: {grading} | final: {final}")
+            print(f"fullCode: {fullCode} | code1: {code1} | code2: {code2} | title: {title} | description: {description[:10]} | units: {units} | subject: {subject} | level: {level} | fall: {fall} | spring: {spring} | summer: {summer} | grading: {grading} | final: {final}")
             
             cursor.execute("""INSERT INTO courses
                             (full_code, code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final) 
                             VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON DUPLICATE KEY UPDATE description=%s and units=%s and subject=%s and level=%s and fall=%s and spring=%s and summer=%s and grading=%s and final=%s""", 
-                            (fullCode, code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final,
-                            description, units, subject, level, fall, spring, summer, grading, final))
+                            ON DUPLICATE KEY UPDATE description=%s, units=%s, subject=%s, level=%s, fall=%s, spring=%s, summer=%s, grading=%s, final=%s""", 
+                            (fullCode, code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final, description, units, subject, level, fall, spring, summer, grading, final))
+            #print(cursor.statement)
             db.commit()
             if prereqs != None:
                 cursor.execute("""INSERT INTO prereqs (course_code, prereq) VALUES(%s, %s)
