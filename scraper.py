@@ -92,8 +92,8 @@ for key in linksDict:
             # code1 is the prefix, such as AEROSPC and code2 is the actual code, such as 1A
             fullCode = basicInfo.find('span', {'class':'code'}).getText()
             fullCode = fullCode.replace('\u00a0', ' ')
-            code1 = fullCode[:fullCode.index(' ')].lower()
-            code2 = fullCode[fullCode.index(' ') + 1:].lower()
+            code1 = fullCode[:fullCode.rindex(' ')].lower()
+            code2 = fullCode[fullCode.rindex(' ') + 1:].lower()
 
             # title is not processed 
             title = basicInfo.find('span', {'class':'title'}).getText()
@@ -157,7 +157,8 @@ for key in linksDict:
                     elif subHeading == "Grading/Final exam status:":
                         temp = details[i].getText()[len(subHeading) + 1:]
                         # The easiest way to check if only a final is listed. From what I've seen, if there is one period it's only talking about the final 
-                        if temp.count('.') == 1:
+                        # Second e.g. check fixes MUSIC R1B
+                        if temp.count('.') == 1 or 'e.g.' in temp:
                             final = temp[:-2].lower()
                         else:
                             grading = temp[:temp.index('.')].lower()
@@ -176,7 +177,7 @@ for key in linksDict:
             #print(cursor.statement)
             db.commit()
             if prereqs != None:
-                cursor.execute("""INSERT INTO prereqs (course_code, prereq) VALUES(%s, %s)
+                cursor.execute("""INSERT INTO prereqs (course_code, prereq) VALUES(%s, %s) 
                                 ON DUPLICATE KEY UPDATE prereq=%s""", 
                                 (fullCode, prereqs, 
                                 prereqs))
