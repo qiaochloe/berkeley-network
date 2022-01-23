@@ -91,7 +91,7 @@ for key in linksDict:
 
             # code1 is the prefix, such as AEROSPC and code2 is the actual code, such as 1A
             fullCode = basicInfo.find('span', {'class':'code'}).getText()
-            fullCode = fullCode.replace('\u00a0', ' ')
+            fullCode = fullCode.replace('\u00a0', ' ').lower()
             code1 = fullCode[:fullCode.rindex(' ')].lower()
             code2 = fullCode[fullCode.rindex(' ') + 1:].lower()
 
@@ -131,6 +131,7 @@ for key in linksDict:
             level = None
             grading = None
             final = None
+            listings = [fullCode]
 
             # details has more advanced info such as prereqs 
             sections = course.find('div', {'class':'coursedetails'}).findChildren('div', recursive=False)
@@ -167,18 +168,25 @@ for key in linksDict:
                     # grading = letter grade
                     elif subHeading == "Grading:":
                         grading = details[i].getText()[len(subHeading) + 1:][:-2].lower()
-            print(f"fullCode: {fullCode} | code1: {code1} | code2: {code2} | title: {title} | description: {description[:10]} | units: {units} | subject: {subject} | level: {level} | fall: {fall} | spring: {spring} | summer: {summer} | grading: {grading} | final: {final}")
+                        
+                    elif subHeading == "Also listed as:":
+                        listings.extend(details[i].getText()[len(subHeading) + 1:].lower().replace("\xa0", " ").split("/"))
+                    # Example: Also listed as: Code1/Code2
+                    # listings = [fullCode, Code1, Code2]
+            
+            print(f"fullCode: {fullCode} | code1: {code1} | code2: {code2} | title: {title} | description: {description[:10]} | units: {units} | subject: {subject} | level: {level} | fall: {fall} | spring: {spring} | summer: {summer} | grading: {grading} | final: {final} | listings: {listings}")
             
             cursor.execute("""INSERT INTO courses
-                            (full_code, code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final) 
-                            VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            (code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final) 
+                            VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE description=%s, units=%s, subject=%s, level=%s, fall=%s, spring=%s, summer=%s, grading=%s, final=%s""", 
-                            (fullCode, code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final, description, units, subject, level, fall, spring, summer, grading, final))
+                            (code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final,
+                             description, units, subject, level, fall, spring, summer, grading, final))
             #print(cursor.statement)
             db.commit()
-            if prereqs != None:
-                cursor.execute("""INSERT INTO prereqs (course_code, prereq) VALUES(%s, %s) 
-                                ON DUPLICATE KEY UPDATE prereq=%s""", 
-                                (fullCode, prereqs, 
-                                prereqs))
-                db.commit()
+            #if prereqs != None:
+            #    cursor.execute("""INSERT INTO prereqs (course_code, prereq) VALUES(%s, %s) 
+            #                    ON DUPLICATE KEY UPDATE prereq=%s""", 
+            #                    (fullCode, prereqs, 
+            #                    prereqs))
+            #    db.commit()
