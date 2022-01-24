@@ -180,25 +180,34 @@ for key in linksDict:
             
             print(f"fullCode: {fullCode} | title: {title} | description: {description[:10]} | units: {units} | subject: {subject} | level: {level} | fall: {fall} | spring: {spring} | summer: {summer} | grading: {grading} | final: {final} | listings: {listings}")
             
-            #Insert infomation into courses 
-            cursor.execute("""INSERT INTO courses
-                            (title, description, units, subject, level, fall, spring, summer, grading, final) 
-                            VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON DUPLICATE KEY UPDATE description=%s, units=%s, subject=%s, level=%s, fall=%s, spring=%s, summer=%s, grading=%s, final=%s""", 
-                            (title, description, units, subject, level, fall, spring, summer, grading, final,
-                             description, units, subject, level, fall, spring, summer, grading, final))
-            #print(cursor.statement)
-            db.commit()
+            cursor.execute("""SELECT * FROM course_codes WHERE full_code=%s""", (fullCode,))
+            entries = cursor.fetchall()
 
-            # The ID assigned by MYSQL to the last row, used to connect it to other tables 
-            lastID = cursor.lastrowid
-            if prereqs != None:
-                cursor.execute("""INSERT INTO prereqs (id, prereq) VALUES(%s, %s) """, 
-                                (lastID, prereqs))
+            # If the course code is in course_codes, it's safe to assume that its been added to all tables 
+            if len(entries) == 0:
+                   
+                #Insert infomation into courses 
+                cursor.execute("""INSERT INTO courses
+                                (title, description, units, subject, level, fall, spring, summer, grading, final) 
+                                VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ON DUPLICATE KEY UPDATE description=%s, units=%s, subject=%s, level=%s, fall=%s, spring=%s, summer=%s, grading=%s, final=%s""", 
+                                (title, description, units, subject, level, fall, spring, summer, grading, final,
+                                description, units, subject, level, fall, spring, summer, grading, final))
+                #print(cursor.statement)
                 db.commit()
 
-            # Insert all course codes into course_codes
-            for listing in listings:
-                cursor.execute("""INSERT INTO course_codes (id, full_code, code1, code2) VALUES(%s, %s, %s, %s)""",
-                                (lastID, listing[0], listing[1], listing[2]))
-                db.commit()
+                # The ID assigned by MYSQL to the last row, used to connect it to other tables 
+                lastID = cursor.lastrowid
+
+                # Insert into prereqs 
+                if prereqs != None:
+                    cursor.execute("""INSERT INTO prereqs (id, prereq) VALUES(%s, %s) """, 
+                                    (lastID, prereqs))
+                    db.commit()
+
+                # Insert all course codes into course_codes
+                for listing in listings:
+                    if entries == 0:
+                        cursor.execute("""INSERT INTO course_codes (id, full_code, code1, code2) VALUES(%s, %s, %s, %s)""",
+                                        (lastID, listing[0], listing[1], listing[2]))
+                        db.commit()
