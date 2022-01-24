@@ -60,6 +60,11 @@ DIR_URL = "http://guide.berkeley.edu/courses/"
 ROOT_URL = "http://guide.berkeley.edu"
 SCHOOL_YEAR = 2021
 
+def getCodes(fullCodeIn):
+    code1 = fullCodeIn[:fullCodeIn.rindex(' ')].lower()
+    code2 = fullCodeIn[fullCodeIn.rindex(' ') + 1:].lower()
+    return [fullCodeIn, code1, code2]
+
 linksDict = {}
 # Get the directory page 
 dirReq = requests.get(DIR_URL)
@@ -92,8 +97,7 @@ for key in linksDict:
             # code1 is the prefix, such as AEROSPC and code2 is the actual code, such as 1A
             fullCode = basicInfo.find('span', {'class':'code'}).getText()
             fullCode = fullCode.replace('\u00a0', ' ').lower()
-            code1 = fullCode[:fullCode.rindex(' ')].lower()
-            code2 = fullCode[fullCode.rindex(' ') + 1:].lower()
+            listings = [getCodes(fullCode)]
 
             # title is not processed 
             title = basicInfo.find('span', {'class':'title'}).getText()
@@ -131,7 +135,6 @@ for key in linksDict:
             level = None
             grading = None
             final = None
-            listings = [fullCode]
 
             # details has more advanced info such as prereqs 
             sections = course.find('div', {'class':'coursedetails'}).findChildren('div', recursive=False)
@@ -168,25 +171,34 @@ for key in linksDict:
                     # grading = letter grade
                     elif subHeading == "Grading:":
                         grading = details[i].getText()[len(subHeading) + 1:][:-2].lower()
-                        
-                    elif subHeading == "Also listed as:":
-                        listings.extend(details[i].getText()[len(subHeading) + 1:].lower().replace("\xa0", " ").split("/"))
                     # Example: Also listed as: Code1/Code2
-                    # listings = [fullCode, Code1, Code2]
+                    # listings = [fullCode, fullCode1, fullCode3]
+                    elif subHeading == "Also listed as:":
+                        altCodes = details[i].getText()[len(subHeading) + 1:].lower().replace("\xa0", " ").split("/")
+                        for code in altCodes:
+                            listings.append(getCodes(code))
             
-            print(f"fullCode: {fullCode} | code1: {code1} | code2: {code2} | title: {title} | description: {description[:10]} | units: {units} | subject: {subject} | level: {level} | fall: {fall} | spring: {spring} | summer: {summer} | grading: {grading} | final: {final} | listings: {listings}")
+            print(f"fullCode: {fullCode} | title: {title} | description: {description[:10]} | units: {units} | subject: {subject} | level: {level} | fall: {fall} | spring: {spring} | summer: {summer} | grading: {grading} | final: {final} | listings: {listings}")
             
+            #Insert infomation into courses 
             cursor.execute("""INSERT INTO courses
-                            (code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final) 
-                            VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            (title, description, units, subject, level, fall, spring, summer, grading, final) 
+                            VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE description=%s, units=%s, subject=%s, level=%s, fall=%s, spring=%s, summer=%s, grading=%s, final=%s""", 
-                            (code1, code2, title, description, units, subject, level, fall, spring, summer, grading, final,
+                            (title, description, units, subject, level, fall, spring, summer, grading, final,
                              description, units, subject, level, fall, spring, summer, grading, final))
             #print(cursor.statement)
             db.commit()
-            #if prereqs != None:
-            #    cursor.execute("""INSERT INTO prereqs (course_code, prereq) VALUES(%s, %s) 
-            #                    ON DUPLICATE KEY UPDATE prereq=%s""", 
-            #                    (fullCode, prereqs, 
-            #                    prereqs))
-            #    db.commit()
+
+            # The ID assigned by MYSQL to the last row, used to connect it to other tables 
+            lastID = cursor.lastrowid
+            if prereqs != None:
+                cursor.execute("""INSERT INTO prereqs (id, prereq) VALUES(%s, %s) """, 
+                                (lastID, prereqs))
+                db.commit()
+
+            # Insert all course codes into course_codes
+            for listing in listings:
+                cursor.execute("""INSERT INTO course_codes (id, full_code, code1, code2) VALUES(%s, %s, %s, %s)""",
+                                (lastID, listing[0], listing[1], listing[2]))
+                db.commit()
