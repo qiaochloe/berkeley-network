@@ -1,3 +1,6 @@
+# TODO
+# Remove Subject 
+
 # COURSE DIRECTORY EXAMPLE:
 # <div id="atozindex">
 #   <h2 class="letternav-head" id="A">...</h2>
@@ -188,11 +191,11 @@ for key in linksDict:
                    
                 #Insert infomation into courses 
                 cursor.execute("""INSERT INTO courses
-                                (title, description, units, subject, level, fall, spring, summer, grading, final) 
-                                VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                ON DUPLICATE KEY UPDATE description=%s, units=%s, subject=%s, level=%s, fall=%s, spring=%s, summer=%s, grading=%s, final=%s""", 
-                                (title, description, units, subject, level, fall, spring, summer, grading, final,
-                                description, units, subject, level, fall, spring, summer, grading, final))
+                                (title, description, units, level, fall, spring, summer, grading, final) 
+                                VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ON DUPLICATE KEY UPDATE description=%s, units=%s, level=%s, fall=%s, spring=%s, summer=%s, grading=%s, final=%s""", 
+                                (title, description, units, level, fall, spring, summer, grading, final,
+                                description, units, level, fall, spring, summer, grading, final))
                 #print(cursor.statement)
                 db.commit()
 
