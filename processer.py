@@ -1,24 +1,25 @@
 # TO DO 
-# - Remove Reading and Composition prefix (R)
-# - Remove American Cultures suffix (AC)
 # - Merge multi-term courses (A-C suffixes)
 # - Merge courses and labs (L suffix)
-# - Sort by lower division (1-99), upper division (100-199), graduate (200-299), professional (300-499)
-# - Delete Individual Study and Research Graduate courses (500-699)
 
 # NONE OF THIS HAS BEEN TESTED 
 
 import mysql.connector
 from dotenv import load_dotenv
 from os import environ
-import re 
 import string
 
 # Codes to be deleted, regardless of suffix of prefix 
-DELETE_CODES = [24, 39, 84, 97, 98, 99, 197, 198, 199]
+DELETE_CODES = ['24', '39', '84', '97', '98', '99', '197', '198', '199']
 
 # All courses with these prefixes will be deleted 
 DELETE_PREFIXES = ['h', 'n']
+
+# Remove these prefixes from course codes
+REMOVE_PREFIXES = ['r'] 
+
+# Remove these suffixes from course codes
+REMOVE_SUFFIXES = ['ac']
 
 alpha = string.ascii_lowercase
 
@@ -38,22 +39,46 @@ db = mysql.connector.connect(
 )
 cursor = db.cursor()
 
+# Deletes all entries with the given ID 
+def deleteID(idIn):
+    cursor.execute("DELETE FROM courses_p WHERE id = %s", (idIn))
+    cursor.execute("DELETE FROM course_codes_p WHERE id = %s", (idIn))
+    cursor.execute("DELETE FROM prereqs_p WHERE id = %s", (idIn))
+    db.commit()
+
+# Deletes based on DELETE_CODES
 def deleteOnCode():
-    query = "DELETE FROM courses_processed WHERE REGEXP_LIKE(code2, '^[a-z](%s)[a-z]*')"
-    query % '|'.join(DELETE_CODES)
+    query = """SELECT id FROM courses_p
+                INNER JOIN course_codes_p USING (id) 
+                WHERE REGEXP_LIKE(code2, '^(%s).*') 
+                GROUP BY id"""
+    query = query % '|'.join(DELETE_CODES)
     cursor.execute(query)
-    db.commit()
+    ids = cursor.fetchall()
+    for id in ids:
+        deleteID(id)
 
+# Deletes based on DELETE_PREFIXES
 def deleteOnPrefix():
-    query = "DELETE FROM courses_processed WHERE REGEXP_LIKE(code2, '^(%s).*')"
-    query % '|'.join(DELETE_PREFIXES)
+    query = """SELECT id FROM courses_p
+                INNER JOIN course_codes_p USING (id) 
+                WHERE REGEXP_LIKE(code2, '^(%s).*') 
+                GROUP BY id"""
+    query = query % '|'.join(DELETE_PREFIXES)
     cursor.execute(query)
-    db.commit()
+    ids = cursor.fetchall()
+    for id in ids:
+        deleteID(id)
 
-def addDivision():
-    cursor.execute("SELECT id, code2 FROM courses_processed WHERE division IS NULL")
+# Add divisions to entries based on the course code 
+# I think this will do cross section courses twice, but that shouldn't matter (but should prob be fixed)
+def addDivision(): 
+    cursor.execute("""SELECT id, code2 FROM courses_p
+                    INNER JOIN course_codes_p USING (id)
+                    WHERE division IS NULL""")
     entries = cursor.fetchall()
     for entry in entries:
+        # Removes all letters from the beginning and end of the string 
         number = int(entry[1].strip(alpha))
         division = None
         if 99 >= number >= 1:
@@ -64,11 +89,52 @@ def addDivision():
             division = 'graduate'
         elif 499 >= number >= 300:
             division = 'profesional'
+        elif 699 >= number >= 500:
+            deleteID(entries[0])
+            continue
         else:
-            print("Error occured, fix it")
+            print("Error occurred, fix it")
             exit()
-        cursor.execute("UPDATE courses_processed SET division = %s WHERE id = %s", (division, entry[0]))
+        cursor.execute("UPDATE courses_p SET division = %s WHERE id = %s", (division, entry[0]))
         db.commit()
 
+# Removes prefixes based on REMOVE_PREFIXES
+def removePrefixes():
+    # Regex: Must start with one of the prefixes then have anything after. Will match if the code has one of the prefixes  
+    query = "SELECT course_code_id, full_code, code2 FROM course_codes_p WHERE REGEXP_LIKE(code2, '^(%s).*')"
+    query = query % "|".join(REMOVE_PREFIXES)
+    cursor.execute(query)
+    entries = cursor.fetchall()
+    
+    for entry in entries:
+        # Removes the first char of the codes 
+        newFullCode = entry[1][entry[1].index(' ') + 2:]
+        newCode2 = entry[2][1:]
+
+        cursor.execute("UPDATE course_codes_p SET full_code = %s, code2 = %s WHERE id = %s", (newFullCode, newCode2, entries[0]))
+        db.commit()
+
+# Removes suffixes based on REMOVE_SUFFIXES
+def removeSuffixes():
+    # Regex: Must be one number then any number of numbers, then the suffix. Will match if the code has one of the suffixes 
+    query = "SELECT course_code_id, full_code, code2 FROM course_codes_p WHERE REGEXP_LIKE(code2, '[0-9][0-9]*(%s')"
+    query = query % "|".join(REMOVE_SUFFIXES)
+    cursor.execute(query)
+    entries = cursor.fetchall()
+
+    for entry in entries:
+        # Removes all letters from the beginning and end of code2, giving the course number 
+        number = entry[2].strip(alpha)
+        # Removes the suffix from the codes
+        newFullCode = entry[1][:entry[1].index(number + len(number))]
+        newCode2 = entry[2][:entry[2].index(number + len(number))]
+
+        cursor.execute("UPDATE course_codes_p SET full_code = %s, code2 = %s WHERE id = %s", (newFullCode, newCode2, entries[0]))
+        db.commit()
+
+# Call all processing methods 
 deleteOnCode()
 deleteOnPrefix()
+addDivision()
+removePrefixes()
+removeSuffixes()

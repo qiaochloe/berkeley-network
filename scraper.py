@@ -210,7 +210,6 @@ for key in linksDict:
 
                 # Insert all course codes into course_codes
                 for listing in listings:
-                    if entries == 0:
-                        cursor.execute("""INSERT INTO course_codes (id, full_code, code1, code2) VALUES(%s, %s, %s, %s)""",
-                                        (lastID, listing[0], listing[1], listing[2]))
-                        db.commit()
+                    cursor.execute("""INSERT INTO course_codes (id, full_code, code1, code2) VALUES(%s, %s, %s, %s)""",
+                                    (lastID, listing[0], listing[1], listing[2]))
+                    db.commit()
