@@ -1,52 +1,25 @@
 # TO DO 
 # - Merge multi-term courses (A-C suffixes)
 # - Merge courses and labs (L suffix)
-# Merge one/two year courses (stated in grading)
+# Merge one/two year courses (stated in grading) 
 
 # Running a single SQL query instead of a select and several updates/deletes is significantly quicker 
 # We should try to do so for some of the methods 
 
+from asyncio import constants
 import mysql.connector
 from dotenv import load_dotenv
 from os import environ
-import string
 
-# Codes to be deleted, regardless of suffix of prefix 
-DELETE_CODES = ['24', '39', '84', '97', '98', '99', '197', '198', '199']
+# Constants from constants.py
+from myConstants import DELETE_CODES 
+from myConstants import DELETE_PREFIXES 
+from myConstants import REMOVE_PREFIXES 
+from myConstants import REMOVE_SUFFIXES 
+from myConstants import DELETE_PREREQS
+from myConstants import FIELDS_DICT 
 
-# All courses with these prefixes will be deleted 
-DELETE_PREFIXES = ['h', 'n']
-
-# Remove these prefixes from course codes
-REMOVE_PREFIXES = ['r'] 
-
-# Remove these suffixes from course codes
-REMOVE_SUFFIXES = ['ac']
-
-# 3d array with each tuple corresponding to a column in courses_p
-# The first element of the tuple is the table name 
-# The second element is a dictionary of what each possible value should be changed to
-FIELDS_DICT = [('level', 
-                    {'graduate':'graduate', 
-                    'professional course for teachers or prospective teachers':'professional', 
-                    'other professional':'professional', 
-                    'graduate examination preparation':'delete', 
-                    'undergraduate':'undergraduate'}),
-                ('grading', 
-                    {'letter grade':'letter grade',
-                    'offered for satisfactory/unsatisfactory grade only':'pass/fail',
-                    'offered for pass/not pass grade only':'pass/fail',
-                    'the grading option will be decided by the instructor when the class is offered':'undecided'}),
-                    # Ignoring one/two year courses for now 
-                ('final', 
-                    {'final exam not required':'final exam not required',
-                    'final exam required':'final exam required',
-                    'alternative to final exam':'alternative to final exam',
-                    'final exam to be decided by the instructor when the class is offered':'undecided',
-                    'final exam required, with common exam group':'group final exam'})]
-                    # Ignoring one/two year courses for now
-
-alpha = string.ascii_lowercase
+from myConstants import ALPHA
 
 # Load env constants
 load_dotenv()
@@ -63,6 +36,13 @@ db = mysql.connector.connect(
     database=DB_NAME
 )
 cursor = db.cursor()
+
+# Processes arrays for removing prereqs
+def processArray(array):
+    # Remvoes empty strings from an array 
+    out = [i.strip(',. ') for i in array]
+    out = [i for i in out if i]
+    return out
 
 # Deletes all entries with the given ID 
 def deleteID(idIn):
@@ -106,7 +86,7 @@ def addDivision():
     entries = cursor.fetchall()
     for entry in entries:
         # Removes all letters from the beginning and end of the string 
-        number = int(entry[1].strip(alpha))
+        number = int(entry[1].strip(ALPHA))
         division = None
         if 99 >= number >= 1:
             division = 'lower'
@@ -137,8 +117,8 @@ def removePrefixes():
     
     for entry in entries:
         # Removes the first char of the codes 
-        newFullCode = entry[1][entry[1].index(' ') + 2:]
         newCode2 = entry[2][1:]
+        newFullCode = entry[1][:entry[1].index(' ')] + newCode2
 
         print(f"Updating {entry[1]} to {newFullCode} for code id {entry[0]} (rmp)")
         cursor.execute("UPDATE course_codes_p SET full_code = %s, code2 = %s WHERE course_code_id = %s", (newFullCode, newCode2, entry[0]))
@@ -154,10 +134,10 @@ def removeSuffixes():
 
     for entry in entries:
         # Removes all letters from the beginning and end of code2, giving the course number 
-        number = entry[2].strip(alpha)
+        number = entry[2].strip(ALPHA)
         # Removes the suffix from the codes
-        newFullCode = entry[1][:entry[1].index(number) + len(number)]
         newCode2 = entry[2][:entry[2].index(number) + len(number)]
+        newFullCode = entry[1][:entry[1].index(number) + len(number)]
 
         print(f"Updating {entry[1]} to {newFullCode} for code id {entry[0]} (rms)")
         cursor.execute("UPDATE course_codes_p SET full_code = %s, code2 = %s WHERE course_code_id = %s", (newFullCode, newCode2, entry[0]))
@@ -183,10 +163,56 @@ def updateFields():
             cursor.execute(query)
             db.commit()
 
+def processPrereqs():
+    cursor.execute("SELECT * FROM prereqs_p")
+    entries = cursor.fetchall()
+    for entry in entries: 
+        prereq = entry[1] 
+        if len(prereq) == 0:
+            continue
+        newPrereq = prereq
+        for substring in DELETE_PREREQS:
+            newPrereq = newPrereq.replace(substring, "")
+            
+        # THIS IS BAD BAD I SHOULD JUST FIGURE OUT AN ALGO INSTEAD OF RANDOMLY CODING
+        if ' or ' in prereq and ' and ' in prereq:
+            orGroups = newPrereq.split(" or ")
+            andGroups = []
+            for orGroup in orGroups:
+                andGroups.extend(orGroup.split(" and "))
+            orGroups = processArray(orGroups)
+            andGroups = processArray(andGroups)
+            print(f"prereq: {prereq} | newPrereq: {newPrereq} | orGroups: {orGroups} | andGroups: {andGroups}")
+        elif  ' and ' in prereq:
+            andGroups = newPrereq.split(" or ")
+            andGroups = processArray(andGroups)
+            print(f"prereq: {prereq} | newPrereq: {newPrereq} | orGroups: {andGroups}")
+        elif ' or ' in prereq:
+            orGroups = newPrereq.split(" or ")
+            andGroups = []
+            for orGroup in orGroups:
+                andGroups.extend(orGroup.split(" and "))
+            orGroups = processArray(orGroups)
+            print(f"prereq: {prereq} | newPrereq: {newPrereq} | orGroups: {orGroups}")
+        else:
+            print(f"prereq: {prereq} | newPrereq: {newPrereq}")
+
+# Unfinished: requires processing prereqs
+def mergeCourses():
+    cursor.execute("SELECT DISTINCT code1 FROM course_codes_p")
+    code1s = cursor.fetchall()
+    for code1 in code1s:
+        cursor.execute("SELECT code2 from course_codes_p WHERE code1 = %s", (code1,))
+        code2s = cursor.fetchall()
+        #for code2 in code2s:
+            #if code2[-1] in ['a', 'b', 'c']:
+
+
 # Call all processing methods 
 deleteOnCode()
 deleteOnPrefix()
 addDivision()
 removePrefixes()
 removeSuffixes()
+processPrereqs()
 updateFields()

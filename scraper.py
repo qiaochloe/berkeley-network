@@ -30,6 +30,7 @@
 #   </div>
 # </div>
 
+from asyncio import constants
 from bs4 import BeautifulSoup
 
 from time import sleep
@@ -56,12 +57,11 @@ db = mysql.connector.connect(
 )
 cursor = db.cursor()
 
-# Remove letters to skip them 
-LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-
-DIR_URL = "http://guide.berkeley.edu/courses/"
-ROOT_URL = "http://guide.berkeley.edu"
-SCHOOL_YEAR = 2021
+# Constants from constants.py
+from myConstants import LETTERS 
+from myConstants import DIR_URL 
+from myConstants import ROOT_URL 
+from myConstants import SCHOOL_YEAR 
 
 def getCodes(fullCodeIn):
     code1 = fullCodeIn[:fullCodeIn.rindex(' ')].lower()
@@ -85,7 +85,7 @@ for i in range(len(categoryGroups)):
 print(linksDict)
 
 for key in linksDict:
-    if key not in LETTERS:
+    if key.lower() not in LETTERS:
         continue
     for link in linksDict[key]:
         linkReq = requests.get(ROOT_URL + link)
