@@ -7,6 +7,7 @@
 # We should try to do so for some of the methods 
 
 from asyncio import constants
+from math import exp
 import mysql.connector
 from dotenv import load_dotenv
 from os import environ
@@ -163,6 +164,29 @@ def updateFields():
             cursor.execute(query)
             db.commit()
 
+class expression:
+    def __init__(self, type, subExpressions):
+        self.type = type
+        self.subExpressions = subExpressions
+
+    # Get the full expression, formatted as a string 
+    def getFullExpression(self):
+        if self.type == "boolean":
+            return self.subExpressions
+        expression = f"{self.type}"
+        for subExpression in self.subExpressions:
+            expression += f"[{subExpression.getFullExpression()}]"
+        return expression
+
+    # TODO: requires a list of completed courses  
+    def evaluateExpression(self):
+        if self.type == "or":
+            return None
+        elif self.type == "and":
+            return None
+        elif self.type == "boolean":
+            return None
+
 def processPrereqs():
     cursor.execute("SELECT * FROM prereqs_p")
     entries = cursor.fetchall()
@@ -170,32 +194,25 @@ def processPrereqs():
         prereq = entry[1] 
         if len(prereq) == 0:
             continue
-        newPrereq = prereq
-        for substring in DELETE_PREREQS:
-            newPrereq = newPrereq.replace(substring, "")
-            
-        # THIS IS BAD BAD I SHOULD JUST FIGURE OUT AN ALGO INSTEAD OF RANDOMLY CODING
-        if ' or ' in prereq and ' and ' in prereq:
-            orGroups = newPrereq.split(" or ")
-            andGroups = []
-            for orGroup in orGroups:
-                andGroups.extend(orGroup.split(" and "))
-            orGroups = processArray(orGroups)
-            andGroups = processArray(andGroups)
-            print(f"prereq: {prereq} | newPrereq: {newPrereq} | orGroups: {orGroups} | andGroups: {andGroups}")
-        elif  ' and ' in prereq:
-            andGroups = newPrereq.split(" or ")
-            andGroups = processArray(andGroups)
-            print(f"prereq: {prereq} | newPrereq: {newPrereq} | orGroups: {andGroups}")
-        elif ' or ' in prereq:
-            orGroups = newPrereq.split(" or ")
-            andGroups = []
-            for orGroup in orGroups:
-                andGroups.extend(orGroup.split(" and "))
-            orGroups = processArray(orGroups)
-            print(f"prereq: {prereq} | newPrereq: {newPrereq} | orGroups: {orGroups}")
-        else:
-            print(f"prereq: {prereq} | newPrereq: {newPrereq}")
+        
+        # Create expression object then delete the substrings 
+        
+
+        # newPrereq = prereq
+        # for substring in DELETE_PREREQS:
+            # if " and " + substring in newPrereq:
+            #     newPrereq = newPrereq.replace(" and " + substring, "")
+            # elif " or " + substring in newPrereq:
+            #     newPrereq = newPrereq.replace(" or " + substring, "")
+            # elif ", and " + substring in newPrereq:
+            #     newPrereq = newPrereq.replace(", and " + substring, "")
+            # elif ", or " + substring in newPrereq:
+            #     newPrereq = newPrereq.replace(", or " + substring, "")
+            # elif ", " + substring in newPrereq:
+            #     newPrereq = newPrereq.replace(", " + substring, "")
+            # elif substring in newPrereq:
+            #     newPrereq = newPrereq.replace(substring, "")
+            # newPrereq.strip(" .")
 
 # Unfinished: requires processing prereqs
 def mergeCourses():
@@ -206,7 +223,6 @@ def mergeCourses():
         code2s = cursor.fetchall()
         #for code2 in code2s:
             #if code2[-1] in ['a', 'b', 'c']:
-
 
 # Call all processing methods 
 deleteOnCode()
