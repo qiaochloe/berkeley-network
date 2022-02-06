@@ -11,6 +11,7 @@ from math import exp
 import mysql.connector
 from dotenv import load_dotenv
 from os import environ
+import re 
 
 # Constants from constants.py
 from myConstants import DELETE_CODES 
@@ -187,6 +188,40 @@ class expression:
         elif self.type == "boolean":
             return None
 
+def createExpression(newPrereq):
+    andIndex = newPrereq.index("and")
+    orIndex = newPrereq.index("or")
+    while andIndex != -1:
+        if newPrereq[andIndex - 2] == ",":
+            andIndex = newPrereq[andIndex + 1:].index("and")
+            continue
+        else: 
+            return expression("and", (createExpression(newPrereq[:andIndex]), createExpression(newPrereq[andIndex + 3:])))
+
+    while orIndex != -1:
+        if newPrereq[orIndex - 2] == ",":
+            orIndex = newPrereq[orIndex + 1:].index("or")
+            continue
+        else: 
+            return expression("or", (createExpression(newPrereq[:orIndex]), createExpression(newPrereq[orIndex + 3:])))
+    
+    if newPrereq[i - 2] == ",":
+                index = newPrereq.index(", and")
+                regex = re.compile(".|and|or")
+
+                match = regex.search(newPrereq[index + 5:])
+
+                expressions.append(newPrereq[index + 5 : index + 5 + match.start()])
+                lastIndex = index
+                for i in range(index, 0, -1):
+                    if newPrereq[i - 3 : i] == "and" or newPrereq[i - 2 : i]:
+                        break
+                    if newPrereq[i] == ",":
+                        expression.append(newPrereq[i + 1 : lastIndex])
+                        lastIndex == i
+            
+            while ", or" in newPrereq:
+
 def processPrereqs():
     cursor.execute("SELECT * FROM prereqs_p")
     entries = cursor.fetchall()
@@ -194,9 +229,36 @@ def processPrereqs():
         prereq = entry[1] 
         if len(prereq) == 0:
             continue
+
+        splitPrereqs = prereq.split(".")
+
+        finalExpression = None
+
+        for newPrereq in splitPrereqs:
+            expressions = []
+            andIndex = newPrereq.index("and")
+            orIndex = newPrereq.index("or")
+
+            while andIndex != -1:
+                if newPrereq[andIndex - 2] == ",":
+                    andIndex = newPrereq[andIndex + 1:].index("and")
+                    continue
+                else: 
+                    finalPrereq = expression("and", (createExpression(newPrereq[:andIndex]), createExpression(newPrereq[andIndex + 3:])))
+                    break
+
+            while orIndex != -1:
+                if newPrereq[orIndex - 2] == ",":
+                    orIndex = newPrereq[orIndex + 1:].index("or")
+                    continue
+                else: 
+                    finalPrereq = expression("or", (createExpression(newPrereq[:orIndex]), createExpression(newPrereq[orIndex + 3:])))
+                    break
+
+            finalPrereq = createExpression(newPrereq)
         
-        # Create expression object then delete the substrings 
-        
+
+                
 
         # newPrereq = prereq
         # for substring in DELETE_PREREQS:
