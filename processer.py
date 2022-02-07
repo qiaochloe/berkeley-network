@@ -7,8 +7,10 @@
 # We should try to do so for some of the methods 
 
 from asyncio import constants
+from concurrent.futures import process
 from distutils.dep_util import newer_pairwise
 from math import exp
+from tokenize import String
 import mysql.connector
 from dotenv import load_dotenv
 from os import environ
@@ -41,10 +43,13 @@ db = mysql.connector.connect(
 cursor = db.cursor()
 
 # Processes arrays for removing prereqs
-def processArray(array):
-    # Remvoes empty strings from an array 
-    out = [i.strip(',. ') for i in array]
-    out = [i for i in out if i]
+def removeEmptyElements(array):
+    # Removes empty strings from an array 
+    #print(f"in {array}")
+    out = [i for i in array if i]
+    if len(out) == 0:
+        out = None
+    #print(f"out {out}")
     return out
 
 # Deletes all entries with the given ID 
@@ -167,74 +172,102 @@ def updateFields():
             db.commit()
 
 class expression:
-    def __init__(self, type, subExpressions):
-        self.type = type
-        self.subExpressions = subExpressions
+    def __init__(self, eType, subExpressions):
+        subExpsP = removeEmptyElements(subExpressions)
+        if subExpsP == None:
+            self.eType = None
+            self.subExpressions = None
+            return 
+        for i in range(len(subExpsP) - 1, -1, -1):
+            if type(subExpsP[i]) is expression:
+                if subExpsP[i].eType == None:
+                    del subExpsP[i]
+        if len(subExpsP) <= 1:
+            self.eType = "boolean"
+        else:
+            self.eType = eType
+        
+        if subExpsP == []:
+            self.subExpressions = None
+            return
+        self.subExpressions = subExpsP
 
     # Get the full expression, formatted as a string 
     def getFullExpression(self):
-        if self.type == "boolean":
-            return self.subExpressions
-        expression = f"{self.type}"
+        #print(f"{self.eType} {self.subExpressions}")
+        if self.subExpressions == None:
+            return "None"
+        if self.eType == "boolean" and type(self.subExpressions[0]) is str:
+            return f"[{self.subExpressions[0]}]"
+        if self.eType != "boolean":
+            expression = f"{self.eType}"
+        else: 
+            expression = ""
         for subExpression in self.subExpressions:
             expression += f"[{subExpression.getFullExpression()}]"
         return expression
 
     # TODO: requires a list of completed courses  
     def evaluateExpression(self):
-        if self.type == "or":
+        if self.eType == "or":
             return None
-        elif self.type == "and":
+        elif self.eType == "and":
             return None
-        elif self.type == "boolean":
+        elif self.eType == "boolean":
             return None
 
 def createExpression(newPrereq):
-    andIndex = newPrereq.index("and")
-    orIndex = newPrereq.index("or")
-    while andIndex != -1:
+    andIndex = newPrereq.index(" and ") if " and " in newPrereq else None
+    orIndex = newPrereq.index(" or ") if " or " in newPrereq else None
+    while andIndex != None:
         if newPrereq[andIndex - 2] == ",":
-            andIndex = newPrereq[andIndex + 1:].index("and")
+            andIndex = newPrereq[andIndex + 1:].index(" and ") if " and " in newPrereq[andIndex + 1:] else None
             continue
         else: 
-            return expression("and", (createExpression(newPrereq[:andIndex]), createExpression(newPrereq[andIndex + 3:])))
+            return expression("and", [createExpression(newPrereq[:andIndex]), createExpression(newPrereq[andIndex + 4:])])
 
-    while orIndex != -1:
+    while orIndex != None:
         if newPrereq[orIndex - 2] == ",":
-            orIndex = newPrereq[orIndex + 1:].index("or")
+            orIndex = newPrereq[orIndex + 1:].index(" or ") if " or " in newPrereq[orIndex + 1:] else None
             continue
         else: 
-            return expression("or", (createExpression(newPrereq[:orIndex]), createExpression(newPrereq[orIndex + 3:])))
+            return expression("or", [createExpression(newPrereq[:orIndex]), createExpression(newPrereq[orIndex + 3:])])
     
-    andIndex = newPrereq.index("and")
-    orIndex = newPrereq.index("or")
+    andIndex = newPrereq.index(" and ") if " and " in newPrereq else None
+    orIndex = newPrereq.index(" or ") if " or " in newPrereq else None
     rawExpressions = []
-    while andIndex != -1:
+    while andIndex != None:
         if newPrereq[andIndex - 2] == ",":
-            index = newPrereq.index(", and")
-        regex = re.compile(".|and|or")
+            index = newPrereq.index(", and ") if ", and " in newPrereq else None
+            regex = re.compile(".|and|or")
 
-        match = regex.search(newPrereq[index + 5:])
+            match = regex.search(newPrereq[index + 5:])
 
-        lastIndex = index
-        for i in range(index, 0, -1):
-            if newPrereq[i - 3 : i] == "and" or newPrereq[i - 2 : i] == "or":
-                break
-            if newPrereq[i] == ",":
-                rawExpressions.append(newPrereq[i + 1 : lastIndex])
-                lastIndex == i
+
+            match = regex.search(newPrereq[index + 5:])
+            rawExpressions.append(newPrereq[index + 5 : index + 5 + match.start()])
+            
+            lastIndex = index
+            for i in range(index, 0, -1):
+                if newPrereq[i - 3 : i] == "and" or newPrereq[i - 2 : i] == "or":
+                    break
+                if newPrereq[i] == ",":
+                    rawExpressions.append(newPrereq[i + 1 : lastIndex])
+                    lastIndex == i
+
     if len(rawExpressions) > 0:
         expressions = []
         for rawExpression in rawExpressions:
             expressions.append(createExpression(rawExpression))
         return expression("and", expressions)
     
-    while orIndex != -1:
+    while orIndex != None:
         if newPrereq[orIndex - 2] == ",":
-            index = newPrereq.index(", and")
+            index = newPrereq.index(", and ") if ", and " in newPrereq else None
             regex = re.compile(".|and|or")
 
             match = regex.search(newPrereq[index + 5:])
+            rawExpressions.append(newPrereq[index + 5 : index + 5 + match.start()])
 
             lastIndex = index
             for i in range(index, 0, -1):
@@ -251,19 +284,24 @@ def createExpression(newPrereq):
         return expression("and", expressions)
     
     # FOR DEBUGGING ONLY 
-    if 'and' in newPrereq or 'or' in newPrereq:
+    if ' and ' in newPrereq or ' or ' in newPrereq:
         print("This should have returned by now because it has and/or...")
         print(newPrereq)
 
     # Remove unneeded prereqs 
     for prereq in DELETE_PREREQS:
         if prereq in newPrereq:
-            newPrereq.replace(prereq, "")
+            newPrereq = newPrereq.replace(prereq, "")
 
-    newPrereq.strip(" .,")
+    newPrereq = newPrereq.strip(" .,")
 
     # This is not done, but I want to see if this is working so far
-    return expression("boolean", newPrereq)
+    
+    # newPrereqP = removeEmptyElements(newPrereq)
+    # if newPrereqP == None:
+    #     return None
+
+    return expression("boolean", [newPrereq])
 
 def processPrereqs():
     cursor.execute("SELECT * FROM prereqs_p")
@@ -275,30 +313,31 @@ def processPrereqs():
 
         splitPrereqs = prereq.split(".")
 
-        finalExpression = None
+        finalPrereq = None
 
         for newPrereq in splitPrereqs:
-            andIndex = newPrereq.index("and")
-            orIndex = newPrereq.index("or")
 
-            while andIndex != -1:
-                if newPrereq[andIndex - 2] == ",":
-                    andIndex = newPrereq[andIndex + 1:].index("and")
-                    continue
-                else: 
-                    finalPrereq = expression("and", (createExpression(newPrereq[:andIndex]), createExpression(newPrereq[andIndex + 3:])))
-                    break
+            # andIndex = newPrereq.index(" and ") if " and " in newPrereq else None
+            # orIndex = newPrereq.index(" or ") if " or " in newPrereq else None
 
-            while orIndex != -1:
-                if newPrereq[orIndex - 2] == ",":
-                    orIndex = newPrereq[orIndex + 1:].index("or")
-                    continue
-                else: 
-                    finalPrereq = expression("or", (createExpression(newPrereq[:orIndex]), createExpression(newPrereq[orIndex + 3:])))
-                    break
+            # while andIndex != None:
+            #     if newPrereq[andIndex - 2] == ",":
+            #         andIndex = newPrereq[andIndex + 1:].index(" and ") if " and " in newPrereq[andIndex + 1:] else None
+            #         continue
+            #     else: 
+            #         finalPrereq = expression("and", (createExpression(newPrereq[:andIndex]), createExpression(newPrereq[andIndex + 3:])))
+            #         break
+
+            # while orIndex != None:
+            #     if newPrereq[orIndex - 2] == ",":
+            #         orIndex = newPrereq[orIndex + 1:].index(" or ") if " or " in newPrereq[orIndex + 1:] else None
+            #         continue
+            #     else: 
+            #         finalPrereq = expression("or", (createExpression(newPrereq[:orIndex]), createExpression(newPrereq[orIndex + 3:])))
+            #         break
 
             finalPrereq = createExpression(newPrereq)
-        print(finalPrereq.getFullExpression())
+        print(f"old: {prereq} | new: {finalPrereq.getFullExpression()}")
 
 # Unfinished: requires processing prereqs
 def mergeCourses():
@@ -311,10 +350,10 @@ def mergeCourses():
             #if code2[-1] in ['a', 'b', 'c']:
 
 # Call all processing methods 
-deleteOnCode()
-deleteOnPrefix()
-addDivision()
-removePrefixes()
-removeSuffixes()
+# deleteOnCode()
+# deleteOnPrefix()
+# addDivision()
+# removePrefixes()
+# removeSuffixes()
 processPrereqs()
-updateFields()
+# updateFields()
