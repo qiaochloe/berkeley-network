@@ -171,38 +171,59 @@ def updateFields():
             cursor.execute(query)
             db.commit()
 
+# CLASS expression 
+# eType: stores the type of the relationship (and, or, boolean)
+# subExpressions: stores an array of expressions, either of type expression or str
+# __init__(eType, subExpressions): the constructor. deals with None values and converting to boolean if neccessary 
+# getFullExpression(): returns the whole expression as a string 
+# evaluateExpression(): TODO determines whether the requirement for the class have been met 
 class expression:
     def __init__(self, eType, subExpressions):
+        
+        # Goes through all subExpressions and removes any where the Type is none 
+        # Iterating backwards prevents the index from "skipping" when an element is removed 
+        for i in range(len(subExpressions) - 1, -1, -1):
+            if type(subExpressions[i]) is expression and subExpressions[i].eType == None:
+                del subExpressions[i]
+        
+        # Removes any blank elements in the array, and returns None if all are removed
         subExpsP = removeEmptyElements(subExpressions)
+
+        # Will only happen if the array is all None values
+        # Expressions of eType == None are removed by parent expression objects, however if this expression is the root, then, 
+        # Expressions of subExpressisons == None are returned as None in getFullExpression()
         if subExpsP == None:
             self.eType = None
             self.subExpressions = None
             return 
-        for i in range(len(subExpsP) - 1, -1, -1):
-            if type(subExpsP[i]) is expression:
-                if subExpsP[i].eType == None:
-                    del subExpsP[i]
+        
+        # Prevents having an eType of and/or with one value 
+        # Example: expression("or", exp1, exp2) where exp2 is None is changed to eType boolean and exp2 is removed 
         if len(subExpsP) <= 1:
             self.eType = "boolean"
         else:
             self.eType = eType
         
-        if subExpsP == []:
-            self.subExpressions = None
-            return
         self.subExpressions = subExpsP
 
-    # Get the full expression, formatted as a string 
     def getFullExpression(self):
         #print(f"{self.eType} {self.subExpressions}")
+        # This should only happen if the root expression is None, since otherwise the constructor will handle it 
         if self.subExpressions == None:
             return "None"
+        
+        # expressions of eType boolean are of type string, unless the type was changed in the constructor 
         if self.eType == "boolean" and type(self.subExpressions[0]) is str:
             return f"[{self.subExpressions[0]}]"
+        
+        # If eType is boolean, it's redunant to have it in the string since it will be obvious 
         if self.eType != "boolean":
             expression = f"{self.eType}"
         else: 
             expression = ""
+        
+        # TODO: Fix issue with excess brackets for booleans, which occurs because they are sometime nested multiple levels deep
+        # The easiest way would be to create a new method that cleans up these boolean chains  
         for subExpression in self.subExpressions:
             expression += f"[{subExpression.getFullExpression()}]"
         return expression
@@ -216,23 +237,32 @@ class expression:
         elif self.eType == "boolean":
             return None
 
+# Recursive method that creates the expression objects 
 def createExpression(newPrereq):
+    # TODO: Generalize code to work with and, or, semicolons, plus,etc with fewer lines  
+    
+    # Looks for "and" first 
+    # The second part prevents an error if the substring does not exist, and assigns None instead
     andIndex = newPrereq.index(" and ") if " and " in newPrereq else None
-    orIndex = newPrereq.index(" or ") if " or " in newPrereq else None
     while andIndex != None:
+        # Ignore chained "and" (a, b, and c)
         if newPrereq[andIndex - 2] == ",":
             andIndex = newPrereq[andIndex + 1:].index(" and ") if " and " in newPrereq[andIndex + 1:] else None
             continue
         else: 
             return expression("and", [createExpression(newPrereq[:andIndex]), createExpression(newPrereq[andIndex + 4:])])
 
+    # Then looks for non-chained "or"
+    orIndex = newPrereq.index(" or ") if " or " in newPrereq else None
     while orIndex != None:
+        # Ignore chained "or" (a, b, and c)
         if newPrereq[orIndex - 2] == ",":
             orIndex = newPrereq[orIndex + 1:].index(" or ") if " or " in newPrereq[orIndex + 1:] else None
             continue
         else: 
             return expression("or", [createExpression(newPrereq[:orIndex]), createExpression(newPrereq[orIndex + 3:])])
     
+    # Refresh the
     andIndex = newPrereq.index(" and ") if " and " in newPrereq else None
     orIndex = newPrereq.index(" or ") if " or " in newPrereq else None
     rawExpressions = []
