@@ -65,5 +65,14 @@ DELETE_PREREQS = [
                     'senior standing and qualifying scholastic record',
                     'appointment as a graduate student instructor',
                     'graduate student researcher appointment',
-                    'equivalent'
+                    'equivalent',
+                    'reading and composition requirement satisfied',
+                    'satisfaction of the reading and composition requirement',
+                    'reading and composition requirement',
+                    'those set by instructor',
+                    'determined by offering'
                 ]
+
+IGNORE_ABBREVS = ['ph.d'] 
+
+PLACEHOLDER = 'PLACEHOLDER'

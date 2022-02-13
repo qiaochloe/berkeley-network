@@ -6,6 +6,7 @@
 # Running a single SQL query instead of a select and several updates/deletes is significantly quicker 
 # We should try to do so for some of the methods 
 
+from ntpath import split
 import mysql.connector
 from dotenv import load_dotenv
 from os import environ
@@ -18,6 +19,8 @@ from myConstants import REMOVE_PREFIXES
 from myConstants import REMOVE_SUFFIXES 
 from myConstants import DELETE_PREREQS
 from myConstants import FIELDS_DICT 
+from myConstants import IGNORE_ABBREVS
+from myConstants import PLACEHOLDER
 
 from myConstants import ALPHA
 
@@ -180,7 +183,7 @@ class expression:
         for i in range(len(subExpressions) - 1, -1, -1):
             if type(subExpressions[i]) is expression and subExpressions[i].eType == None:
                 del subExpressions[i]
-        
+
         # Removes any blank elements in the array, and returns None if all are removed
         subExpsP = removeEmptyElements(subExpressions)
 
@@ -209,7 +212,7 @@ class expression:
         
         # expressions of eType boolean are of type string, unless the type was changed in the constructor 
         if self.eType == "boolean" and type(self.subExpressions[0]) is str:
-            return f"[{self.subExpressions[0]}]"
+            return f"{self.subExpressions[0]}"
         
         # If eType is boolean, it's redunant to have it in the string since it will be obvious 
         if self.eType != "boolean":
@@ -234,109 +237,77 @@ class expression:
 
 # Recursive method that creates the expression objects
 # It will continually go deeper into "and"/"or" statements until it gets to the raw prereqs 
-def createExpression(newPrereq):
-    # TODO: Generalize code to work with and, or, semicolons, plus,etc with fewer lines  
-    # TODO: Ignore and/or that is within DELETE_STRINGS 
-        # Ideally you would remove it but then you would have issues with chained -
-        # Actually you could replace them with a unique string which you could check for here
+def createExpression(newPrereqIn):
+    # Key: word that shows up in prereqs | Value: type of operator 
+    operators = {' and ':'and', ' plus ':'and', ' or ':'or'}
+    # Checks for non-chained in order of op precedence 
+    for operator in operators:
+
+        opIndex = newPrereqIn.find(operator) 
+        while opIndex != -1:
+            # Ignore chained operator (a, b, and/or c)
+            if newPrereqIn[opIndex - 1] == ",":
+                # Find the next operator if it exists 
+                opIndex = newPrereqIn.find(operator, opIndex + 1) 
+                continue
+            else: 
+                # Splits the string around the operator into two separate expressions 
+                return expression(operators[operator], [createExpression(newPrereqIn[:opIndex]), createExpression(newPrereqIn[opIndex + len(operator):])])
     
-    # Looks for "and" first 
-    # The second part prevents an error if the substring does not exist, and assigns None instead
-    andIndex = newPrereq.index(" and ") if " and " in newPrereq else None
-    while andIndex != None:
-        # Ignore chained "and" (a, b, and c)
-        if newPrereq[andIndex - 2] == ",":
-            # Find the next "and" if it exists 
-            andIndex = newPrereq[andIndex + 1:].index(" and ") if " and " in newPrereq[andIndex + 1:] else None
-            continue
-        else: 
-            # Splits the string around the "and" into two separate expressions 
-            return expression("and", [createExpression(newPrereq[:andIndex]), createExpression(newPrereq[andIndex + 4:])])
+    for operator in operators:
+        # Stores the indivdual sections of a chained statement 
+        rawExpressions = []
 
-    # Then looks for non-chained "or"
-    orIndex = newPrereq.index(" or ") if " or " in newPrereq else None
-    while orIndex != None:
-        if newPrereq[orIndex - 2] == ",":
-            orIndex = newPrereq[orIndex + 1:].index(" or ") if " or " in newPrereq[orIndex + 1:] else None
-            continue
-        else:  
-            return expression("or", [createExpression(newPrereq[:orIndex]), createExpression(newPrereq[orIndex + 3:])])
-    
-    # Stores the indivdual sections of a chained statement 
-    rawExpressions = []
+        # Find chained operator
+        opIndex = newPrereqIn.find(operator)
+        while opIndex != -1:
 
-    # Find chained "and" 
-    andIndex = newPrereq.index(" and ") if " and " in newPrereq else None
-    while andIndex != None:
-        if newPrereq[andIndex - 2] == ",":
-            index = andIndex - 2
+            if newPrereqIn[opIndex - 1] == ",":
+                index = opIndex - 1
 
-            # Find a terminating character and add add section of the chain to rawExpressions
-            regex = re.compile(".|and|or")
-            match = regex.search(newPrereq[index + 5:])
-            rawExpressions.append(newPrereq[index + 5 : index + 5 + match.start()])
-            
-            # Go through the string backwards, saving each section into rawExpressions
-            lastIndex = index
-            for i in range(index, 0, -1):
-                # Finding and/or signals the end of the chain 
-                if newPrereq[i - 3 : i] == "and" or newPrereq[i - 2 : i] == "or":
-                    break
-                # Finding a comma signals the end of a section 
-                if newPrereq[i] == ",":
-                    rawExpressions.append(newPrereq[i + 1 : lastIndex])
-                    lastIndex == i
-        else:
-            andIndex = newPrereq[andIndex + 1:].index(" or ") if " or " in newPrereq[andIndex + 1:] else None
+                # Find a terminating character and add add section of the chain to rawExpressions
+                regex = re.compile(".|and|or")
+                match = regex.search(newPrereqIn[index + len(operator):])
+                start = match.start()
+                if start != 0:
+                    rawExpressions.append(newPrereqIn[index + len(operator):index + len(operator) + start])
+                else:
+                    rawExpressions.append(newPrereqIn[index + len(operator):])
+                
+                # Go through the string backwards, saving each section into rawExpressions
+                lastIndex = index
+                for i in range(index - 1, 0, -1):
+                    # Finding and/or signals the end of the chain 
+                    if newPrereqIn[i - 3 : i] == "and" or newPrereqIn[i - 2 : i] == "or":
+                        break
+                    # Finding a comma signals the end of a section 
+                    if newPrereqIn[i] == ",":
+                        rawExpressions.append(newPrereqIn[i + 1 : lastIndex])
+                        lastIndex = i
+                rawExpressions.append(newPrereqIn[:lastIndex])
+                break
+            else:
+                opIndex = newPrereqIn.find(operator, opIndex + 1)
 
-    # If a chained "and" was found, create expressions 
-    if len(rawExpressions) > 0:
-        expressions = []
-        for rawExpression in rawExpressions:
-            expressions.append(createExpression(rawExpression))
-        return expression("and", expressions)
-    
-    orIndex = newPrereq.index(" or ") if " or " in newPrereq else None
-    while orIndex != None:
-        if newPrereq[orIndex - 2] == ",":
-            index = orIndex - 2
-            regex = re.compile(".|and|or")
-
-            match = regex.search(newPrereq[index + 5:])
-            rawExpressions.append(newPrereq[index + 5 : index + 5 + match.start()])
-
-            lastIndex = index
-            for i in range(index, 0, -1):
-                if newPrereq[i - 3 : i] == "and" or newPrereq[i - 2 : i] == "or":
-                    break
-                if newPrereq[i] == ",":
-                    rawExpressions.append(newPrereq[i + 1 : lastIndex])
-                    lastIndex == i
-        else:
-            orIndex = newPrereq[orIndex + 1:].index(" or ") if " or " in newPrereq[orIndex + 1:] else None
-    
-    if len(rawExpressions) > 0:
-        expressions = []
-        for rawExpression in rawExpressions:
-            expressions.append(createExpression(rawExpression))
-        return expression("and", expressions)
+        # If a chained "and" was found, create expressions 
+        if len(rawExpressions) > 0:
+            expressions = []
+            for rawExpression in rawExpressions:
+                expressions.append(createExpression(rawExpression))
+            return expression(operators[operator], expressions)
     
     # FOR DEBUGGING ONLY 
-    if ' and ' in newPrereq or ' or ' in newPrereq:
+    if ' and ' in newPrereqIn or ' or ' in newPrereqIn:
         print("This should have returned by now because it has and/or...")
-        print(newPrereq)
-
-    # Remove unneeded prereqs 
-    for prereq in DELETE_PREREQS:
-        if prereq in newPrereq:
-            newPrereq = newPrereq.replace(prereq, "")
+        print(newPrereqIn)
 
     # Strip stuff on the ends, just in case 
-    newPrereq = newPrereq.strip(" .,")
+    newPrereqIn = newPrereqIn.replace(PLACEHOLDER, "")
+    newPrereqIn = newPrereqIn.strip(" .,;")
 
     # If code reaches here, it means there are no and/or remaining so it must be boolean 
     # TODO: process boolean expressions further 
-    return expression("boolean", [newPrereq])
+    return expression("boolean", [newPrereqIn])
 
 def processPrereqs():
     cursor.execute("SELECT * FROM prereqs_p")
@@ -349,15 +320,42 @@ def processPrereqs():
         if len(prereq) == 0:
             continue
 
-        # Split sentences 
-        # TODO: this messes up acroynyms like "ph.d."
-        splitPrereqs = prereq.split(". ")
+        for delPre in DELETE_PREREQS:
+            prereq = prereq.replace(delPre, PLACEHOLDER)
 
-        finalPrereq = None
+        # Split sentences 
+        # TODO: fix this mess 
+        splitPrereqs = []
+        lastIndex = 0
+        for i in range(len(prereq)):
+            skip = False
+            if prereq[i : i + 2] == ". ":
+                for abbrev in IGNORE_ABBREVS:
+                    for j in range(len(abbrev)):
+                        if abbrev[j] == ".":
+                            if prereq[i - j:i - j + len(abbrev)] == abbrev:
+                                # wtf am i doing 
+                                skip = True
+                                break
+                    if skip == True:
+                        break
+                if not skip:
+                    splitPrereqs.extend(prereq[lastIndex:i].split(';'))
+                    lastIndex = i
+                    skip = False
+        splitPrereqs.extend(prereq[lastIndex:].split(';'))
+
+        print(f"old: {entry[1]} | in: {prereq} |", end="")
+        finalPrereqs = []
         for newPrereq in splitPrereqs:
-            finalPrereq = createExpression(newPrereq)
+            finalPrereqs.append(createExpression(newPrereq))
         
-        print(f"old: {prereq} | new: {finalPrereq.getFullExpression()}")
+        if len(finalPrereqs) > 1:
+            finalExpression = expression("and", finalPrereqs)
+        else:
+            finalExpression = expression("boolean", finalPrereqs)
+        
+        print(f" new: {finalExpression.getFullExpression()}")
         # TODO: Actually save these until a table, once it's debugged 
 
 # Unfinished: requires processing prereqs
