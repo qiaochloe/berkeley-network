@@ -174,6 +174,7 @@ def updateFields():
 # subExpressions: stores an array of expressions, either of type expression or str
 # __init__(eType, subExpressions): the constructor. deals with None values and converting to boolean if neccessary 
 # getFullExpression(): returns the whole expression as a string 
+# getPrereqs(): returns prereqs as a 1D array of strings 
 # evaluateExpression(): TODO determines whether the requirement for the class have been met 
 class expression:
     def __init__(self, eType, subExpressions):
@@ -226,6 +227,20 @@ class expression:
             expression += f"[{subExpression.getFullExpression()}]"
         return expression
 
+    # TODO: Test this 
+    def getPrereqs(self):
+        prereqs = []
+        if self.subExpressions == None:
+            return prereqs
+        
+        if self.eType == "boolean":
+            prereqs.extend(self.subExpressions)
+        else:
+            for expression in self.subExpressions:
+                prereqs.extend(expression.getPrereqs())
+
+        return prereqs
+    
     # TODO: requires a list of completed courses  
     def evaluateExpression(self):
         if self.eType == "or":
