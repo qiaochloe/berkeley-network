@@ -175,6 +175,7 @@ def updateFields():
 # __init__(eType, subExpressions): the constructor. deals with None values and converting to boolean if neccessary 
 # getFullExpression(): returns the whole expression as a string 
 # getPrereqs(): returns prereqs as a 1D array of strings 
+# fixBrackets(): removes unneccessary chains of boolean objects. modifies its object, no return 
 # evaluateExpression(): TODO determines whether the requirement for the class have been met 
 class expression:
     def __init__(self, eType, subExpressions):
@@ -241,7 +242,6 @@ class expression:
 
         return prereqs
     
-    # TODO: Test this 
     def fixBrackets(self):
         if self.subExpressions == None:
             return
