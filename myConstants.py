@@ -73,6 +73,6 @@ DELETE_PREREQS = [
                     'determined by offering'
                 ]
 
-IGNORE_ABBREVS = ['ph.d'] 
+IGNORE_ABBREVS = ['ph.d', 'ph.d.'] 
 
 PLACEHOLDER = 'PLACEHOLDER'

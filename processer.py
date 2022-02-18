@@ -241,6 +241,17 @@ class expression:
 
         return prereqs
     
+    # TODO: Test this 
+    def fixBrackets(self):
+        if self.subExpressions == None:
+            return
+        if self.eType == "boolean":
+            while type(self.subExpressions[0]) is expression:
+                self.subExpressions = self.subExpressions[0].subExpressions
+        else:
+            for subExpression in self.subExpressions:
+                subExpression.fixBrackets()
+
     # TODO: requires a list of completed courses  
     def evaluateExpression(self):
         if self.eType == "or":
@@ -368,8 +379,10 @@ def processPrereqs():
         if len(finalPrereqs) > 1:
             finalExpression = expression("and", finalPrereqs)
         else:
-            finalExpression = expression("boolean", finalPrereqs)
+            finalExpression = finalPrereqs[0]
         
+        finalExpression.fixBrackets()
+
         print(f" new: {finalExpression.getFullExpression()}")
         # TODO: Actually save these until a table, once it's debugged 
 
