@@ -70,7 +70,8 @@ DELETE_PREREQS = [
                     'satisfaction of the reading and composition requirement',
                     'reading and composition requirement',
                     'those set by instructor',
-                    'determined by offering'
+                    'determined by offering',
+                    'regulations set by college of letters and science'
                 ]
 
 IGNORE_ABBREVS = ['ph.d', 'ph.d.'] 

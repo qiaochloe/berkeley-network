@@ -38,7 +38,10 @@ db = mysql.connector.connect(
     password=PASSWORD,
     database=DB_NAME
 )
-cursor = db.cursor()
+
+# Fixes some issues, don't really understand why
+# Smth about lazy loading 
+cursor = db.cursor(buffered=True)
 
 # Processes arrays for removing prereqs
 def removeEmptyElements(array):
@@ -261,11 +264,70 @@ class expression:
         elif self.eType == "boolean":
             return None
 
+# Processes boolean strings so remove the junk and retrieve the courses
+def processBoolean(stringIn, code1In):
+    # Fix "17a is not prerequisite to 17b" bs
+    if "is not prerequisite to" in stringIn: 
+        return expression(None, [None])
+
+    prereqs = []
+    if "is a prerequisite to" in stringIn:
+        prereqs.extend(stringIn.split(" is a prerequisite to "))
+    else:
+        # Deal with prereqs like 201a-201c
+        words = stringIn.split(' ')
+        for word in words: 
+            if len(word.split('-')) == 2:
+                courses = word.split('-')
+                courseCodeMatch = re.search(r"[0-9][0-9]*", courses[0])
+                if courseCodeMatch == None:
+                    break
+                courseCode = courseCodeMatch.group()
+                slice = ALPHA[ALPHA.find(courses[0][-1]) : ALPHA.find(courses[1][-1]) + 1]
+                for letter in slice:
+                    prereqs.append(courseCode + letter)
+    
+    if len(prereqs) > 0:
+        expressions = []
+        for prereq in prereqs:
+            expressions.append(createExpression(prereq, code1In))
+        return expression('and', expressions)
+
+    # There is prob a better way to do this 
+    # Put an array of tuples into courses, index 0 is the startIndex and index 2 is the text
+    courses = []
+    # Matches number that are surrounded by letters then are surrounded by spaces or the end/start of string
+    for match in re.finditer(r"(^|\s)[a-z]*[0-9][0-9]*[a-z]*($|\s)", stringIn):
+        courses.append((match.start(), match.group()))
+
+    if courses == None or len(courses) == 0:
+        return expression(None, [None])
+    elif len(courses) > 1 or len(courses) == 0:
+        print(f" What the fuck: {courses} |")
+    else: 
+        regexIndex = courses[0][0]
+        if regexIndex > 1:
+            # gets the word before the course 
+            lastWord = stringIn[:regexIndex - 1].split(" ")[-1]
+            cursor.execute("SELECT DISTINCT code1 FROM course_codes_p")
+            code1s = cursor.fetchall()
+            if lastWord in code1s:
+                fullPrereq = lastWord + " " + courses[0][1]
+            else:
+                fullPrereq = code1In + " " + courses[0][1]
+        else:
+            fullPrereq = code1In + " " + courses[0][1]
+
+        # Strip stuff on the ends, just in case 
+        fullPrereq = fullPrereq.replace(PLACEHOLDER, "")
+        fullPrereq = fullPrereq.strip(" .,;")
+        return expression("boolean", [fullPrereq])
+
 # Recursive method that creates the expression objects
 # It will continually go deeper into "and"/"or" statements until it gets to the raw prereqs 
-def createExpression(newPrereqIn):
+def createExpression(newPrereqIn, code1In):
     # Key: word that shows up in prereqs | Value: type of operator 
-    operators = {' and ':'and', ' plus ':'and', ' or ':'or'}
+    operators = {' and ':'and', ' plus ':'and', ' or ':'or', ' and/or ':'or'}
     # Checks for non-chained in order of op precedence 
     for operator in operators:
 
@@ -278,7 +340,7 @@ def createExpression(newPrereqIn):
                 continue
             else: 
                 # Splits the string around the operator into two separate expressions 
-                return expression(operators[operator], [createExpression(newPrereqIn[:opIndex]), createExpression(newPrereqIn[opIndex + len(operator):])])
+                return expression(operators[operator], [createExpression(newPrereqIn[:opIndex], code1In), createExpression(newPrereqIn[opIndex + len(operator):], code1In)])
     
     for operator in operators:
         # Stores the indivdual sections of a chained statement 
@@ -319,7 +381,7 @@ def createExpression(newPrereqIn):
         if len(rawExpressions) > 0:
             expressions = []
             for rawExpression in rawExpressions:
-                expressions.append(createExpression(rawExpression))
+                expressions.append(createExpression(rawExpression, code1In))
             return expression(operators[operator], expressions)
     
     # FOR DEBUGGING ONLY 
@@ -330,16 +392,17 @@ def createExpression(newPrereqIn):
     # Strip stuff on the ends, just in case 
     newPrereqIn = newPrereqIn.replace(PLACEHOLDER, "")
     newPrereqIn = newPrereqIn.strip(" .,;")
-
-    # If code reaches here, it means there are no and/or remaining so it must be boolean 
-    # TODO: process boolean expressions further 
-    return expression("boolean", [newPrereqIn])
+    return processBoolean(newPrereqIn, code1In)
 
 def processPrereqs():
     cursor.execute("SELECT * FROM prereqs_p")
     entries = cursor.fetchall()
     for entry in entries: 
         prereq = entry[1] 
+        cursor.execute("SELECT code1 FROM course_codes_p WHERE id = %s", (entry[0],))
+
+        # Returns a tuple so the [0] is neccessary
+        code1 = cursor.fetchone()[0]
 
         # Ignore blank prereqs
         # TODO: Copy blank prereqs into the processed table 
@@ -374,7 +437,7 @@ def processPrereqs():
         print(f"old: {entry[1]} | in: {prereq} |", end="")
         finalPrereqs = []
         for newPrereq in splitPrereqs:
-            finalPrereqs.append(createExpression(newPrereq))
+            finalPrereqs.append(createExpression(newPrereq, code1))
         
         if len(finalPrereqs) > 1:
             finalExpression = expression("and", finalPrereqs)
