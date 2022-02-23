@@ -204,6 +204,7 @@ for key in linksDict:
 
                 # Insert into prereqs 
                 if prereqs != None:
+                    print(f"prereqs: {prereqs}")
                     cursor.execute("""INSERT INTO prereqs (id, prereq) VALUES(%s, %s) """, 
                                     (lastID, prereqs))
                     db.commit()

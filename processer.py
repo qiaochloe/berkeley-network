@@ -1,4 +1,6 @@
-# TO DO 
+# TODO 
+# Get both the code and actual department name (antropology v anthro)
+# Fix c103/integrative issue 
 # Merge multi-term courses (A-C suffixes)
 # Merge courses and labs (L suffix)
 # Merge one/two year courses (stated in grading) 
@@ -6,6 +8,7 @@
 # Running a single SQL query instead of a select and several updates/deletes is significantly quicker 
 # We should try to do so for some of the methods 
 
+from cmath import exp
 from ntpath import split
 import mysql.connector
 from dotenv import load_dotenv
@@ -97,7 +100,7 @@ def addDivision():
         # Removes all letters from the beginning and end of the string 
         number = int(entry[1].strip(ALPHA))
         division = None
-        if 99 >= number >= 1:
+        if 99 >= number:
             division = 'lower'
         elif 199 >= number >= 100: 
             division ='upper'
@@ -105,7 +108,7 @@ def addDivision():
             division = 'graduate'
         elif 499 >= number >= 300:
             division = 'profesional'
-        elif 699 >= number >= 500:
+        elif number >= 500:
             print(f"Deleting {entry[1]} because of its division")
             deleteID(entry[0])
             continue
@@ -249,7 +252,7 @@ class expression:
         if self.subExpressions == None:
             return
         if self.eType == "boolean":
-            while type(self.subExpressions[0]) is expression:
+            while type(self.subExpressions[0]) is expression and self.subExpressions[0].eType == "boolean":
                 self.subExpressions = self.subExpressions[0].subExpressions
         else:
             for subExpression in self.subExpressions:
@@ -272,7 +275,9 @@ def processBoolean(stringIn, code1In):
 
     prereqs = []
     if "is a prerequisite to" in stringIn:
-        prereqs.extend(stringIn.split(" is a prerequisite to "))
+        prereqs.append(stringIn.split("is a prerequisite to")[0])
+    elif "is prerequisite to" in stringIn:
+        prereqs.append(stringIn.split("is prerequisite to")[0])
     else:
         # Deal with prereqs like 201a-201c
         words = stringIn.split(' ')
@@ -286,6 +291,7 @@ def processBoolean(stringIn, code1In):
                 slice = ALPHA[ALPHA.find(courses[0][-1]) : ALPHA.find(courses[1][-1]) + 1]
                 for letter in slice:
                     prereqs.append(courseCode + letter)
+                break
     
     if len(prereqs) > 0:
         expressions = []
@@ -304,19 +310,31 @@ def processBoolean(stringIn, code1In):
         return expression(None, [None])
     elif len(courses) > 1 or len(courses) == 0:
         print(f" What the fuck: {courses} |")
+        return expression(None, [None])
     else: 
         regexIndex = courses[0][0]
-        if regexIndex > 1:
-            # gets the word before the course 
-            lastWord = stringIn[:regexIndex - 1].split(" ")[-1]
-            cursor.execute("SELECT DISTINCT code1 FROM course_codes_p")
-            code1s = cursor.fetchall()
-            if lastWord in code1s:
-                fullPrereq = lastWord + " " + courses[0][1]
-            else:
-                fullPrereq = code1In + " " + courses[0][1]
-        else:
-            fullPrereq = code1In + " " + courses[0][1]
+        # gets the word before the course 
+        lastWord = stringIn[:regexIndex].split(" ")[-1].strip()
+        last2Words = stringIn[:regexIndex].split(" ")[-1].strip() + " " + stringIn[:regexIndex].split(" ")[-1].strip()
+        nextWords = stringIn[regexIndex:].split(" ")
+
+        # Ignore the number if the next word is units
+        if len(nextWords) > 1:
+            nextWord = stringIn[regexIndex:].split(" ")[1].strip()
+            if nextWord.startswith("units"):
+                return expression(None, [None])
+
+        # Set prereq using codeIn
+        fullPrereq = code1In + " " + courses[0][1].strip()
+
+        # Check if other code should be used and if so, update fullPrereq
+        cursor.execute("SELECT * FROM categories")
+        codes = cursor.fetchall()
+        for codeSet in codes:
+            newCodes = [codeSet[0], codeSet[1], codeSet[2]]
+            if lastWord in newCodes or last2Words in newCodes:
+                fullPrereq = newCodes[1] + " " + courses[0][1].strip()
+                break
 
         # Strip stuff on the ends, just in case 
         fullPrereq = fullPrereq.replace(PLACEHOLDER, "")
@@ -327,11 +345,10 @@ def processBoolean(stringIn, code1In):
 # It will continually go deeper into "and"/"or" statements until it gets to the raw prereqs 
 def createExpression(newPrereqIn, code1In):
     # Key: word that shows up in prereqs | Value: type of operator 
-    operators = {' and ':'and', ' plus ':'and', ' or ':'or', ' and/or ':'or'}
+    operators = {' and ':'and', ' plus ':'and', ' & ':'and', ' or ':'or', ' and/or ':'or'}
     # Checks for non-chained in order of op precedence 
     for operator in operators:
-
-        opIndex = newPrereqIn.find(operator) 
+        opIndex = newPrereqIn.find(operator)
         while opIndex != -1:
             # Ignore chained operator (a, b, and/or c)
             if newPrereqIn[opIndex - 1] == ",":
@@ -389,13 +406,21 @@ def createExpression(newPrereqIn, code1In):
         print("This should have returned by now because it has and/or...")
         print(newPrereqIn)
 
-    # Strip stuff on the ends, just in case 
-    newPrereqIn = newPrereqIn.replace(PLACEHOLDER, "")
-    newPrereqIn = newPrereqIn.strip(" .,;")
-    return processBoolean(newPrereqIn, code1In)
+    # For stuff like anthro 1, bio 2
+    commaSplit = newPrereqIn.split(', ')
+    if len(commaSplit) > 1:
+        expressions = []
+        for prereq in commaSplit:
+            expressions.append(processBoolean(prereq, code1In))
+        return expression("and", expressions)
+    else:
+        # Strip stuff on the ends, just in case 
+        newPrereqIn = newPrereqIn.replace(PLACEHOLDER, "")
+        newPrereqIn = newPrereqIn.strip(" .,;")
+        return (processBoolean(newPrereqIn, code1In))
 
 def processPrereqs():
-    cursor.execute("SELECT * FROM prereqs_p")
+    cursor.execute("SELECT * FROM prereqs_p where flag = true")
     entries = cursor.fetchall()
     for entry in entries: 
         prereq = entry[1] 
@@ -434,9 +459,10 @@ def processPrereqs():
                     skip = False
         splitPrereqs.extend(prereq[lastIndex:].split(';'))
 
-        print(f"old: {entry[1]} | in: {prereq} |", end="")
+        print(f"\nold: {entry[1]} \n", end="")
         finalPrereqs = []
         for newPrereq in splitPrereqs:
+            print(f"in: {newPrereq} \n", end="")
             finalPrereqs.append(createExpression(newPrereq, code1))
         
         if len(finalPrereqs) > 1:
@@ -446,7 +472,13 @@ def processPrereqs():
         
         finalExpression.fixBrackets()
 
-        print(f" new: {finalExpression.getFullExpression()}")
+        print(f"new: {finalExpression.getFullExpression()}")
+
+        flag = input("Flag? ")
+
+        if flag == "":
+            cursor.execute("UPDATE prereqs_p SET flag = false WHERE id = %s", (entry[0], ))
+            db.commit()
         # TODO: Actually save these until a table, once it's debugged 
 
 # Unfinished: requires processing prereqs
@@ -460,10 +492,10 @@ def mergeCourses():
             #if code2[-1] in ['a', 'b', 'c']:
 
 # Call all processing methods 
-# deleteOnCode()
-# deleteOnPrefix()
-# addDivision()
-# removePrefixes()
-# removeSuffixes()
+deleteOnCode()
+deleteOnPrefix()
+addDivision()
+removePrefixes()
+removeSuffixes()
 processPrereqs()
 # updateFields()
