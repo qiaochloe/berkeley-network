@@ -267,6 +267,19 @@ class expression:
         elif self.eType == "boolean":
             return None
 
+# Gets the department using the last 2 words
+def getDepartment(code1In, lastWordIn, last2WordsIn):
+    out = code1In
+    # Check if other code should be used and if so, update fullPrereq
+    cursor.execute("SELECT * FROM categories")
+    codes = cursor.fetchall()
+    for codeSet in codes:
+        newCodes = [codeSet[0], codeSet[1], codeSet[2]]
+        if lastWordIn in newCodes or last2WordsIn in newCodes:
+            print(newCodes)
+            out = newCodes[1]
+    return out 
+
 # Processes boolean strings so remove the junk and retrieve the courses
 def processBoolean(stringIn, code1In):
     # Fix "17a is not prerequisite to 17b" bs
@@ -281,16 +294,30 @@ def processBoolean(stringIn, code1In):
     else:
         # Deal with prereqs like 201a-201c
         words = stringIn.split(' ')
-        for word in words: 
-            if len(word.split('-')) == 2:
-                courses = word.split('-')
-                courseCodeMatch = re.search(r"[0-9][0-9]*", courses[0])
+        for i in range(len(words)): 
+            if len(words[i].split('-')) == 2:
+                
+                # Get last words. Setting them to EMPTY works because the prereq is all lower 
+                lastWord = "EMPTY"
+                last2Words = "EMPTY"
+                # gets the word before the course 
+                if len(words[:i]) > 0:
+                    lastWord = words[i-1]
+                if len(words[:i-1]) > 0:
+                    last2Words = words[i-2] + " " + lastWord
+
+                courses = words[i].split('-')
+                courseCodeMatch = re.search(r"(^|\s|\())[a-z]*[0-9][0-9]*", courses[0])
                 if courseCodeMatch == None:
                     break
                 courseCode = courseCodeMatch.group()
+                # Get range of letters 
                 slice = ALPHA[ALPHA.find(courses[0][-1]) : ALPHA.find(courses[1][-1]) + 1]
+                department = getDepartment(code1In, lastWord, last2Words)
+                print(lastWord)
                 for letter in slice:
-                    prereqs.append(courseCode + letter)
+                    prereqs.append(department + " " + courseCode.strip() + letter)
+                
                 break
     
     if len(prereqs) > 0:
@@ -303,7 +330,7 @@ def processBoolean(stringIn, code1In):
     # Put an array of tuples into courses, index 0 is the startIndex and index 2 is the text
     courses = []
     # Matches number that are surrounded by letters then are surrounded by spaces or the end/start of string
-    for match in re.finditer(r"(^|\s)[a-z]*[0-9][0-9]*[a-z]*($|\s)", stringIn):
+    for match in re.finditer(r"(^|\s|\())[a-z]*[0-9][0-9]*[a-z]*($|\s|\))", stringIn):
         courses.append((match.start(), match.group()))
 
     if courses == None or len(courses) == 0:
@@ -314,10 +341,15 @@ def processBoolean(stringIn, code1In):
     else: 
         regexIndex = courses[0][0]
         # gets the word before the course 
-        lastWord = stringIn[:regexIndex].split(" ")[-1].strip()
-        last2Words = stringIn[:regexIndex].split(" ")[-1].strip() + " " + stringIn[:regexIndex].split(" ")[-1].strip()
+        lastWord = "EMPTY"
+        last2Words = "EMPTY"
+        root = stringIn[:regexIndex].split(" ")
+        if len(root) >= 1:
+            lastWord = root[-1].strip()
+        if len(root) >= 2:
+            last2Words = root[-2].strip()
+        
         nextWords = stringIn[regexIndex:].split(" ")
-
         # Ignore the number if the next word is units
         if len(nextWords) > 1:
             nextWord = stringIn[regexIndex:].split(" ")[1].strip()
@@ -325,16 +357,7 @@ def processBoolean(stringIn, code1In):
                 return expression(None, [None])
 
         # Set prereq using codeIn
-        fullPrereq = code1In + " " + courses[0][1].strip()
-
-        # Check if other code should be used and if so, update fullPrereq
-        cursor.execute("SELECT * FROM categories")
-        codes = cursor.fetchall()
-        for codeSet in codes:
-            newCodes = [codeSet[0], codeSet[1], codeSet[2]]
-            if lastWord in newCodes or last2Words in newCodes:
-                fullPrereq = newCodes[1] + " " + courses[0][1].strip()
-                break
+        fullPrereq = getDepartment(code1In, lastWord, last2Words) + " " + courses[0][1].strip()
 
         # Strip stuff on the ends, just in case 
         fullPrereq = fullPrereq.replace(PLACEHOLDER, "")
@@ -346,19 +369,8 @@ def processBoolean(stringIn, code1In):
 def createExpression(newPrereqIn, code1In):
     # Key: word that shows up in prereqs | Value: type of operator 
     operators = {' and ':'and', ' plus ':'and', ' & ':'and', ' or ':'or', ' and/or ':'or'}
-    # Checks for non-chained in order of op precedence 
-    for operator in operators:
-        opIndex = newPrereqIn.find(operator)
-        while opIndex != -1:
-            # Ignore chained operator (a, b, and/or c)
-            if newPrereqIn[opIndex - 1] == ",":
-                # Find the next operator if it exists 
-                opIndex = newPrereqIn.find(operator, opIndex + 1) 
-                continue
-            else: 
-                # Splits the string around the operator into two separate expressions 
-                return expression(operators[operator], [createExpression(newPrereqIn[:opIndex], code1In), createExpression(newPrereqIn[opIndex + len(operator):], code1In)])
-    
+
+    # check for chained operators
     for operator in operators:
         # Stores the indivdual sections of a chained statement 
         rawExpressions = []
@@ -371,25 +383,16 @@ def createExpression(newPrereqIn, code1In):
                 index = opIndex - 1
 
                 # Find a terminating character and add add section of the chain to rawExpressions
-                regex = re.compile(".|and|or")
-                match = regex.search(newPrereqIn[index + len(operator):])
-                start = match.start()
-                if start != 0:
-                    rawExpressions.append(newPrereqIn[index + len(operator):index + len(operator) + start])
-                else:
-                    rawExpressions.append(newPrereqIn[index + len(operator):])
-                
-                # Go through the string backwards, saving each section into rawExpressions
-                lastIndex = index
-                for i in range(index - 1, 0, -1):
-                    # Finding and/or signals the end of the chain 
-                    if newPrereqIn[i - 3 : i] == "and" or newPrereqIn[i - 2 : i] == "or":
-                        break
-                    # Finding a comma signals the end of a section 
-                    if newPrereqIn[i] == ",":
-                        rawExpressions.append(newPrereqIn[i + 1 : lastIndex])
-                        lastIndex = i
-                rawExpressions.append(newPrereqIn[:lastIndex])
+                # regex = re.compile(".|and|or")
+                # match = regex.search(newPrereqIn[index + len(operator):])
+                # start = match.start()
+                # if start != 0:
+                #     rawExpressions.append(newPrereqIn[index + len(operator):index + len(operator) + start])
+                #     rawExpressions.append(newPrereqIn[index + len(operator) + start:])
+                # else:
+                #     rawExpressions.append(newPrereqIn[index + len(operator):])
+                rawExpressions.extend(newPrereqIn[index:].split(','))
+                rawExpressions.extend(newPrereqIn[:index].split(','))
                 break
             else:
                 opIndex = newPrereqIn.find(operator, opIndex + 1)
@@ -398,8 +401,21 @@ def createExpression(newPrereqIn, code1In):
         if len(rawExpressions) > 0:
             expressions = []
             for rawExpression in rawExpressions:
-                expressions.append(createExpression(rawExpression, code1In))
+                expressions.append(createExpression(rawExpression.strip(), code1In))
             return expression(operators[operator], expressions)
+    
+    # Checks for non-chained in order of op precedence 
+    for operator in operators:
+        opIndex = newPrereqIn.find(operator)
+        while opIndex != -1:
+            # Ignore chained operator (a, b, and/or c)
+            if newPrereqIn[opIndex - 1] == ",":
+                # Find the next operator if it exists 
+                opIndex = newPrereqIn.find(operator, opIndex + 1) 
+                continue
+            else: 
+                # Splits the string around the operator into two separate expressions 
+                return expression(operators[operator], [createExpression(newPrereqIn[:opIndex], code1In), createExpression(newPrereqIn[opIndex + len(operator):], code1In)])
     
     # FOR DEBUGGING ONLY 
     if ' and ' in newPrereqIn or ' or ' in newPrereqIn:
@@ -457,7 +473,7 @@ def processPrereqs():
                     splitPrereqs.extend(prereq[lastIndex:i].split(';'))
                     lastIndex = i
                     skip = False
-        splitPrereqs.extend(prereq[lastIndex:].split(';'))
+        splitPrereqs.extend(prereq[lastIndex + 1:].split(';'))
 
         print(f"\nold: {entry[1]} \n", end="")
         finalPrereqs = []
