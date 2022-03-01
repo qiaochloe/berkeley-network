@@ -269,16 +269,21 @@ class expression:
 
 # Gets the department using the last 2 words
 def getDepartment(code1In, lastWordIn, last2WordsIn):
-    out = code1In
     # Check if other code should be used and if so, update fullPrereq
     cursor.execute("SELECT * FROM categories")
     codes = cursor.fetchall()
+    # Go and check for last two words find (prevents integrative biology from being recognized as biology)
     for codeSet in codes:
         newCodes = [codeSet[0], codeSet[1], codeSet[2]]
-        if lastWordIn in newCodes or last2WordsIn in newCodes:
+        if last2WordsIn in newCodes:
             print(newCodes)
-            out = newCodes[1]
-    return out 
+            return newCodes[1]
+    for codeSet in codes:
+        newCodes = [codeSet[0], codeSet[1], codeSet[2]]
+        if lastWordIn in newCodes:
+            print(newCodes)
+            return newCodes[1]
+    return code1In
 
 # Processes boolean strings so remove the junk and retrieve the courses
 def processBoolean(stringIn, code1In):
@@ -293,7 +298,8 @@ def processBoolean(stringIn, code1In):
         prereqs.append(stringIn.split("is prerequisite to")[0])
     else:
         # Deal with prereqs like 201a-201c
-        words = stringIn.split(' ')
+        words = re.split('\s|/', stringIn)
+        print(words)
         for i in range(len(words)): 
             if len(words[i].split('-')) == 2:
                 
@@ -307,7 +313,7 @@ def processBoolean(stringIn, code1In):
                     last2Words = words[i-2] + " " + lastWord
 
                 courses = words[i].split('-')
-                courseCodeMatch = re.search(r"(^|\s|\())[a-z]*[0-9][0-9]*", courses[0])
+                courseCodeMatch = re.search(r"(^|\s|\(|/)[a-z]*[0-9][0-9]*", courses[0])
                 if courseCodeMatch == None:
                     break
                 courseCode = courseCodeMatch.group()
@@ -316,7 +322,7 @@ def processBoolean(stringIn, code1In):
                 department = getDepartment(code1In, lastWord, last2Words)
                 print(lastWord)
                 for letter in slice:
-                    prereqs.append(department + " " + courseCode.strip() + letter)
+                    prereqs.append(department + " " + courseCode.strip(" ()") + letter)
                 
                 break
     
@@ -330,7 +336,7 @@ def processBoolean(stringIn, code1In):
     # Put an array of tuples into courses, index 0 is the startIndex and index 2 is the text
     courses = []
     # Matches number that are surrounded by letters then are surrounded by spaces or the end/start of string
-    for match in re.finditer(r"(^|\s|\())[a-z]*[0-9][0-9]*[a-z]*($|\s|\))", stringIn):
+    for match in re.finditer(r"(^|\s|\(|/)[a-z]*[0-9][0-9]*[a-z]*($|\s|\))", stringIn):
         courses.append((match.start(), match.group()))
 
     if courses == None or len(courses) == 0:
@@ -343,11 +349,11 @@ def processBoolean(stringIn, code1In):
         # gets the word before the course 
         lastWord = "EMPTY"
         last2Words = "EMPTY"
-        root = stringIn[:regexIndex].split(" ")
-        if len(root) >= 1:
-            lastWord = root[-1].strip()
-        if len(root) >= 2:
-            last2Words = root[-2].strip()
+        words = re.split(" /", stringIn[:regexIndex])
+        if len(words) >= 1:
+            lastWord = words[-1].strip()
+        if len(words) >= 2:
+            last2Words = words[-2].strip()
         
         nextWords = stringIn[regexIndex:].split(" ")
         # Ignore the number if the next word is units
@@ -357,7 +363,7 @@ def processBoolean(stringIn, code1In):
                 return expression(None, [None])
 
         # Set prereq using codeIn
-        fullPrereq = getDepartment(code1In, lastWord, last2Words) + " " + courses[0][1].strip()
+        fullPrereq = getDepartment(code1In, lastWord, last2Words) + " " + courses[0][1].strip(" ()")
 
         # Strip stuff on the ends, just in case 
         fullPrereq = fullPrereq.replace(PLACEHOLDER, "")
@@ -368,7 +374,7 @@ def processBoolean(stringIn, code1In):
 # It will continually go deeper into "and"/"or" statements until it gets to the raw prereqs 
 def createExpression(newPrereqIn, code1In):
     # Key: word that shows up in prereqs | Value: type of operator 
-    operators = {' and ':'and', ' plus ':'and', ' & ':'and', ' or ':'or', ' and/or ':'or'}
+    operators = {' and ':'and', ' plus ':'and', ' & ':'and', ' or ':'or', ' and/or ':'or', '/':'or'}
 
     # check for chained operators
     for operator in operators:
@@ -471,9 +477,9 @@ def processPrereqs():
                         break
                 if not skip:
                     splitPrereqs.extend(prereq[lastIndex:i].split(';'))
-                    lastIndex = i
+                    lastIndex = i + 2
                     skip = False
-        splitPrereqs.extend(prereq[lastIndex + 1:].split(';'))
+        splitPrereqs.extend(prereq[lastIndex:].split(';'))
 
         print(f"\nold: {entry[1]} \n", end="")
         finalPrereqs = []
