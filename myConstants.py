@@ -76,6 +76,8 @@ DELETE_PREREQS = [
                     'regulations set by college of letters and science'
                 ]
 
+DELETE_PREREQ_SENTENCE = ['score', 'though neither is required']
+
 IGNORE_ABBREVS = ['ph.d', 'ph.d.', 'e.g.'] 
 
 PLACEHOLDER = 'PLACEHOLDER'

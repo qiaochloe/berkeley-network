@@ -1,6 +1,7 @@
 # TODO 
-# Get both the code and actual department name (antropology v anthro)
-# Fix c103/integrative issue 
+# Prereqs stuff: 
+# african 1, 2, and 3 
+# fixBrackets by checking if sub types are the same type 
 # Merge multi-term courses (A-C suffixes)
 # Merge courses and labs (L suffix)
 # Merge one/two year courses (stated in grading) 
@@ -16,7 +17,7 @@ from os import environ
 import re 
 
 # Constants from constants.py
-from myConstants import DELETE_CODES 
+from myConstants import DELETE_CODES, DELETE_PREREQ_SENTENCE 
 from myConstants import DELETE_PREFIXES 
 from myConstants import REMOVE_PREFIXES 
 from myConstants import REMOVE_SUFFIXES 
@@ -24,6 +25,7 @@ from myConstants import DELETE_PREREQS
 from myConstants import FIELDS_DICT 
 from myConstants import IGNORE_ABBREVS
 from myConstants import PLACEHOLDER
+from myConstants import DELETE_PREREQ_SENTENCE
 
 from myConstants import ALPHA
 
@@ -269,6 +271,7 @@ class expression:
 
 # Gets the department using the last 2 words
 def getDepartment(code1In, lastWordIn, last2WordsIn):
+    # print(f"code1In: {code1In} | lastWord: {lastWordIn} | last2: {last2WordsIn}")
     # Check if other code should be used and if so, update fullPrereq
     cursor.execute("SELECT * FROM categories")
     codes = cursor.fetchall()
@@ -276,12 +279,10 @@ def getDepartment(code1In, lastWordIn, last2WordsIn):
     for codeSet in codes:
         newCodes = [codeSet[0], codeSet[1], codeSet[2]]
         if last2WordsIn in newCodes:
-            print(newCodes)
             return newCodes[1]
     for codeSet in codes:
         newCodes = [codeSet[0], codeSet[1], codeSet[2]]
         if lastWordIn in newCodes:
-            print(newCodes)
             return newCodes[1]
     return code1In
 
@@ -299,10 +300,8 @@ def processBoolean(stringIn, code1In):
     else:
         # Deal with prereqs like 201a-201c
         words = re.split('\s|/', stringIn)
-        print(words)
         for i in range(len(words)): 
-            if len(words[i].split('-')) == 2:
-                
+            if len(words[i].split('-')) >= 2:
                 # Get last words. Setting them to EMPTY works because the prereq is all lower 
                 lastWord = "EMPTY"
                 last2Words = "EMPTY"
@@ -311,20 +310,24 @@ def processBoolean(stringIn, code1In):
                     lastWord = words[i-1]
                 if len(words[:i-1]) > 0:
                     last2Words = words[i-2] + " " + lastWord
+                department = getDepartment(code1In, lastWord, last2Words)
 
                 courses = words[i].split('-')
-                courseCodeMatch = re.search(r"(^|\s|\(|/)[a-z]*[0-9][0-9]*", courses[0])
-                if courseCodeMatch == None:
+                if len(courses) == 2:
+                    courseCodeMatch = re.search(r"(^|\s|\(|/)[a-z]*[0-9][0-9]*", courses[0])
+                    if courseCodeMatch == None:
+                        break
+                    courseCode = courseCodeMatch.group()
+                    # Get range of letters 
+                    slice = ALPHA[ALPHA.find(courses[0][-1]) : ALPHA.find(courses[1][-1]) + 1]
+                    print(lastWord)
+                    for letter in slice:
+                        prereqs.append(department + " " + courseCode.strip().strip("()") + letter)
                     break
-                courseCode = courseCodeMatch.group()
-                # Get range of letters 
-                slice = ALPHA[ALPHA.find(courses[0][-1]) : ALPHA.find(courses[1][-1]) + 1]
-                department = getDepartment(code1In, lastWord, last2Words)
-                print(lastWord)
-                for letter in slice:
-                    prereqs.append(department + " " + courseCode.strip(" ()") + letter)
-                
-                break
+                else:
+                    for course in courses:
+                        prereqs.append(department + " " + course.strip().strip("()"))
+
     
     if len(prereqs) > 0:
         expressions = []
@@ -349,11 +352,11 @@ def processBoolean(stringIn, code1In):
         # gets the word before the course 
         lastWord = "EMPTY"
         last2Words = "EMPTY"
-        words = re.split(" /", stringIn[:regexIndex])
+        words = re.split("\s|/", stringIn[:regexIndex])
         if len(words) >= 1:
             lastWord = words[-1].strip()
         if len(words) >= 2:
-            last2Words = words[-2].strip()
+            last2Words = words[-2].strip() + " " + lastWord
         
         nextWords = stringIn[regexIndex:].split(" ")
         # Ignore the number if the next word is units
@@ -363,10 +366,9 @@ def processBoolean(stringIn, code1In):
                 return expression(None, [None])
 
         # Set prereq using codeIn
-        fullPrereq = getDepartment(code1In, lastWord, last2Words) + " " + courses[0][1].strip(" ()")
+        fullPrereq = getDepartment(code1In, lastWord, last2Words) + " " + courses[0][1].strip().strip("()")
 
         # Strip stuff on the ends, just in case 
-        fullPrereq = fullPrereq.replace(PLACEHOLDER, "")
         fullPrereq = fullPrereq.strip(" .,;")
         return expression("boolean", [fullPrereq])
 
@@ -476,22 +478,51 @@ def processPrereqs():
                     if skip == True:
                         break
                 if not skip:
-                    splitPrereqs.extend(prereq[lastIndex:i].split(';'))
+                    splitPrereqs.append(prereq[lastIndex:i])
                     lastIndex = i + 2
                     skip = False
-        splitPrereqs.extend(prereq[lastIndex:].split(';'))
+        splitPrereqs.append(prereq[lastIndex:])
+        print(splitPrereqs)
+
+        splitExpressions = []
+        for prereq in splitPrereqs:
+            if prereq.find("; or") != -1:
+                splitExpressions.append(["or", prereq.split("; or")])
+            elif prereq.find(";") != -1:
+                splitExpressions.append(["and", prereq.split(";")])
+            else:
+                splitExpressions.append(["boolean", [prereq]])
+        
+        # remove if it has score in it
+        for i in range(len(splitExpressions)):
+            for j in range(len(splitExpressions[i][1])):
+                for delPrereq in DELETE_PREREQ_SENTENCE:
+                    if splitExpressions[i][1][j].find(delPrereq) != -1:
+                        del splitExpressions[i][1][j]
+                        break
 
         print(f"\nold: {entry[1]} \n", end="")
         finalPrereqs = []
-        for newPrereq in splitPrereqs:
-            print(f"in: {newPrereq} \n", end="")
-            finalPrereqs.append(createExpression(newPrereq, code1))
+        for splitExpression in splitExpressions:
+            subFinalPrereqs = []
+            for newPrereq in splitExpression[1]:
+                print(f"in: {newPrereq} \n", end="")
+                subFinalPrereqs.append(createExpression(newPrereq, code1))
+            if len(splitExpression[1]) == 0:
+                subFinalPrereqs.append(None)
+            
+            if splitExpression[0] == "and":
+                finalPrereqs.append(expression("and", subFinalPrereqs))
+            elif splitExpression[0] == "or":
+                finalPrereqs.append(expression("or", subFinalPrereqs))
+            else:
+                finalPrereqs.append(subFinalPrereqs[0])
         
-        if len(finalPrereqs) > 1:
+        if len(finalPrereqs) > 0:
             finalExpression = expression("and", finalPrereqs)
         else:
             finalExpression = finalPrereqs[0]
-        
+
         finalExpression.fixBrackets()
 
         print(f"new: {finalExpression.getFullExpression()}")
