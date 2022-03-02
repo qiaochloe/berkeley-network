@@ -1,7 +1,9 @@
 # TODO 
 # Prereqs stuff: 
 # african 1, 2, and 3 
-# fixBrackets by checking if sub types are the same type 
+# fixBrackets by checking if sub types are the same type
+# add a check to see if the course exists 
+#
 # Merge multi-term courses (A-C suffixes)
 # Merge courses and labs (L suffix)
 # Merge one/two year courses (stated in grading) 
@@ -229,9 +231,7 @@ class expression:
             expression = f"{self.eType}"
         else: 
             expression = ""
-        
-        # TODO: Fix issue with excess brackets for booleans, which occurs because they are sometime nested multiple levels deep
-        # The easiest way would be to create a new method that cleans up these boolean chains  
+         
         for subExpression in self.subExpressions:
             expression += f"[{subExpression.getFullExpression()}]"
         return expression
@@ -254,11 +254,32 @@ class expression:
         if self.subExpressions == None:
             return
         if self.eType == "boolean":
-            while type(self.subExpressions[0]) is expression and self.subExpressions[0].eType == "boolean":
+            if type(self.subExpressions[0]) is expression and self.subExpressions[0].eType == "boolean":
                 self.subExpressions = self.subExpressions[0].subExpressions
-        else:
-            for subExpression in self.subExpressions:
-                subExpression.fixBrackets()
+        elif self.eType == "or":
+            # first check if all the sub exps are or 
+            matching = True
+            for subExp in self.subExpressions:
+                if subExp.eType != "or":
+                    matching = False
+            # merge if matching
+            if matching == True:
+                newSubExp = []
+                for subExp in self.subExpressions:
+                    newSubExp.extend(subExp.subExpressions)
+                self.subExpressions = newSubExp
+        elif self.eType == "and":
+            newSubExp = []
+            for subExp in self.subExpressions:
+                if subExp.eType == "and":
+                    newSubExp.extend(subExp.subExpressions)
+                else:
+                    newSubExp.append(subExp)
+            self.subExpressions = newSubExp
+
+        for subExp in self.subExpressions:
+            if type(subExp) is expression:
+                subExp.fixBrackets()
 
     # TODO: requires a list of completed courses  
     def evaluateExpression(self):
@@ -482,7 +503,6 @@ def processPrereqs():
                     lastIndex = i + 2
                     skip = False
         splitPrereqs.append(prereq[lastIndex:])
-        print(splitPrereqs)
 
         splitExpressions = []
         for prereq in splitPrereqs:
@@ -523,7 +543,7 @@ def processPrereqs():
         else:
             finalExpression = finalPrereqs[0]
 
-        finalExpression.fixBrackets()
+        # finalExpression.fixBrackets()
 
         print(f"new: {finalExpression.getFullExpression()}")
 
