@@ -10,7 +10,8 @@ DIR_URL = "http://guide.berkeley.edu/courses/"
 ROOT_URL = "http://guide.berkeley.edu"
 SCHOOL_YEAR = 2021
 
-ALT_CATEGORY_DICT = {"blank":"blank"}
+# engin
+ALT_CATEGORY_DICT = {"biology":"bio", "bio eng":"bioe", "compsci":"sci"}
 
 # PROCESSER.PY CONSTANTS
 # Codes to be deleted, regardless of suffix or prefix 

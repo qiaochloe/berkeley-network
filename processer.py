@@ -13,6 +13,7 @@
 
 from cmath import exp
 from ntpath import split
+import string
 import mysql.connector
 from dotenv import load_dotenv
 from os import environ
@@ -28,6 +29,7 @@ from myConstants import FIELDS_DICT
 from myConstants import IGNORE_ABBREVS
 from myConstants import PLACEHOLDER
 from myConstants import DELETE_PREREQ_SENTENCE
+from myConstants import ALT_CATEGORY_DICT
 
 from myConstants import ALPHA
 
@@ -256,18 +258,28 @@ class expression:
         if self.eType == "boolean":
             if type(self.subExpressions[0]) is expression and self.subExpressions[0].eType == "boolean":
                 self.subExpressions = self.subExpressions[0].subExpressions
+                self.fixBrackets()
+            elif type(self.subExpressions[0]) is expression and (self.subExpressions[0].eType == "and" or self.subExpressions[0].eType == "or"):
+                self.eType = self.subExpressions[0].eType
+                self.subExpressions = self.subExpressions[0].subExpressions
+                self.fixBrackets()
         elif self.eType == "or":
             # first check if all the sub exps are or 
             matching = True
             for subExp in self.subExpressions:
-                if subExp.eType != "or":
+                if subExp.eType == "and":
                     matching = False
             # merge if matching
             if matching == True:
                 newSubExp = []
                 for subExp in self.subExpressions:
-                    newSubExp.extend(subExp.subExpressions)
-                self.subExpressions = newSubExp
+                    if subExp.eType == 'or':
+                        newSubExp.extend(subExp.subExpressions)
+                    else:
+                        newSubExp.append(subExp)
+                if self.subExpressions != newSubExp:
+                    self.subExpressions = newSubExp
+                    self.fixBrackets()
         elif self.eType == "and":
             newSubExp = []
             for subExp in self.subExpressions:
@@ -275,7 +287,9 @@ class expression:
                     newSubExp.extend(subExp.subExpressions)
                 else:
                     newSubExp.append(subExp)
-            self.subExpressions = newSubExp
+            if self.subExpressions != newSubExp:
+                self.subExpressions = newSubExp
+                self.fixBrackets()
 
         for subExp in self.subExpressions:
             if type(subExp) is expression:
@@ -320,7 +334,7 @@ def processBoolean(stringIn, code1In):
         prereqs.append(stringIn.split("is prerequisite to")[0])
     else:
         # Deal with prereqs like 201a-201c
-        words = re.split('\s|/', stringIn)
+        words = re.split('\s|/|\(|\)', stringIn)
         for i in range(len(words)): 
             if len(words[i].split('-')) >= 2:
                 # Get last words. Setting them to EMPTY works because the prereq is all lower 
@@ -343,11 +357,17 @@ def processBoolean(stringIn, code1In):
                     slice = ALPHA[ALPHA.find(courses[0][-1]) : ALPHA.find(courses[1][-1]) + 1]
                     print(lastWord)
                     for letter in slice:
-                        prereqs.append(department + " " + courseCode.strip().strip("()") + letter)
+                        if "concurrent" in stringIn:
+                            prereqs.append(department + " " + courseCode.strip().strip("()") + letter + " conc")
+                        else:
+                            prereqs.append(department + " " + courseCode.strip().strip("()") + letter)
                     break
                 else:
                     for course in courses:
-                        prereqs.append(department + " " + course.strip().strip("()"))
+                        if "concurrent" in stringIn:
+                            prereqs.append(department + " " + course.strip().strip("()") + " conc")
+                        else:
+                            prereqs.append(department + " " + course.strip().strip("()"))
 
     
     if len(prereqs) > 0:
@@ -373,7 +393,7 @@ def processBoolean(stringIn, code1In):
         # gets the word before the course 
         lastWord = "EMPTY"
         last2Words = "EMPTY"
-        words = re.split("\s|/", stringIn[:regexIndex])
+        words = re.split("\s|/|\(|\)", stringIn[:regexIndex])
         if len(words) >= 1:
             lastWord = words[-1].strip()
         if len(words) >= 2:
@@ -387,7 +407,10 @@ def processBoolean(stringIn, code1In):
                 return expression(None, [None])
 
         # Set prereq using codeIn
-        fullPrereq = getDepartment(code1In, lastWord, last2Words) + " " + courses[0][1].strip().strip("()")
+        course = courses[0][1].strip().strip("()")
+        if "concurrent" in stringIn:
+            course += " conc"
+        fullPrereq = getDepartment(code1In, lastWord, last2Words) + " " + course
 
         # Strip stuff on the ends, just in case 
         fullPrereq = fullPrereq.strip(" .,;")
@@ -397,7 +420,7 @@ def processBoolean(stringIn, code1In):
 # It will continually go deeper into "and"/"or" statements until it gets to the raw prereqs 
 def createExpression(newPrereqIn, code1In):
     # Key: word that shows up in prereqs | Value: type of operator 
-    operators = {' and ':'and', ' plus ':'and', ' & ':'and', ' or ':'or', ' and/or ':'or', '/':'or'}
+    operators = {' and ':'and', ' plus ':'and', ' & ':'and', 'as well as ':'and',' or ':'or', ' and/or ':'or', '/':'or'}
 
     # check for chained operators
     for operator in operators:
@@ -543,7 +566,9 @@ def processPrereqs():
         else:
             finalExpression = finalPrereqs[0]
 
-        # finalExpression.fixBrackets()
+        print(f"pre-fix: {finalExpression.getFullExpression()}")
+
+        finalExpression.fixBrackets()
 
         print(f"new: {finalExpression.getFullExpression()}")
 
