@@ -326,12 +326,16 @@ def processBoolean(stringIn, code1In):
     # Fix "17a is not prerequisite to 17b" bs
     if "is not prerequisite to" in stringIn: 
         return expression(None, [None])
+    elif "may be taken before" in stringIn:
+        return expression(None, [None])
 
     prereqs = []
     if "is a prerequisite to" in stringIn:
         prereqs.append(stringIn.split("is a prerequisite to")[0])
     elif "is prerequisite to" in stringIn:
         prereqs.append(stringIn.split("is prerequisite to")[0])
+    elif "is prerequisite for" in stringIn:
+        prereqs.append(stringIn.split("is prerequisite for")[0])
     else:
         # Deal with prereqs like 201a-201c
         words = re.split('\s|/|\(|\)', stringIn)
@@ -538,11 +542,14 @@ def processPrereqs():
         
         # remove if it has score in it
         for i in range(len(splitExpressions)):
-            for j in range(len(splitExpressions[i][1])):
+            j = 0
+            while j < len(splitExpressions[i][1]):
                 for delPrereq in DELETE_PREREQ_SENTENCE:
                     if splitExpressions[i][1][j].find(delPrereq) != -1:
                         del splitExpressions[i][1][j]
+                        j -= 1
                         break
+                j += 1
 
         print(f"\nold: {entry[1]} \n", end="")
         finalPrereqs = []

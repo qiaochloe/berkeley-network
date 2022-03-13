@@ -11,7 +11,7 @@ ROOT_URL = "http://guide.berkeley.edu"
 SCHOOL_YEAR = 2021
 
 # engin
-ALT_CATEGORY_DICT = {"biology":"bio", "bio eng":"bioe", "compsci":"sci"}
+ALT_CATEGORY_DICT = {"biology":"bio", "bio eng":"bioe", "compsci":"cs"}
 
 # PROCESSER.PY CONSTANTS
 # Codes to be deleted, regardless of suffix or prefix 
