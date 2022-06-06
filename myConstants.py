@@ -10,8 +10,9 @@ DIR_URL = "http://guide.berkeley.edu/courses/"
 ROOT_URL = "http://guide.berkeley.edu"
 SCHOOL_YEAR = 2021
 
-# engin
-ALT_CATEGORY_DICT = {"biology":"bio", "bio eng":"bioe", "compsci":"cs"}
+# Official short code : alt code
+# Cannot currently handle multiple alternates 
+ALT_CATEGORY_DICT = {"biology":"bio", "bio eng":"bioe", "compsci":"cs", "mec eng":"me", "el eng":"ee", "civ eng":"ce"}
 
 # PROCESSER.PY CONSTANTS
 # Codes to be deleted, regardless of suffix or prefix 

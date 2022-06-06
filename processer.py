@@ -19,6 +19,9 @@ from dotenv import load_dotenv
 from os import environ
 import re 
 
+# Expression class 
+from expression import Expression
+
 # Constants from constants.py
 from myConstants import DELETE_CODES, DELETE_PREREQ_SENTENCE 
 from myConstants import DELETE_PREFIXES 
@@ -181,129 +184,6 @@ def updateFields():
             cursor.execute(query)
             db.commit()
 
-# CLASS expression 
-# eType: stores the type of the relationship (and, or, boolean)
-# subExpressions: stores an array of expressions, either of type expression or str
-# __init__(eType, subExpressions): the constructor. deals with None values and converting to boolean if neccessary 
-# getFullExpression(): returns the whole expression as a string 
-# getPrereqs(): returns prereqs as a 1D array of strings 
-# fixBrackets(): removes unneccessary chains of boolean objects. modifies its object, no return 
-# evaluateExpression(): TODO determines whether the requirement for the class have been met 
-class expression:
-    def __init__(self, eType, subExpressions):
-        
-        # Goes through all subExpressions and removes any where the Type is none 
-        # Iterating backwards prevents the index from "skipping" when an element is removed 
-        for i in range(len(subExpressions) - 1, -1, -1):
-            if type(subExpressions[i]) is expression and subExpressions[i].eType == None:
-                del subExpressions[i]
-
-        # Removes any blank elements in the array, and returns None if all are removed
-        subExpsP = removeEmptyElements(subExpressions)
-
-        # Will only happen if the array is all None values
-        # Expressions of eType == None are removed by parent expression objects, however if this expression is the root, then, 
-        # Expressions of subExpressisons == None are returned as None in getFullExpression()
-        if subExpsP == None:
-            self.eType = None
-            self.subExpressions = None
-            return 
-        
-        # Prevents having an eType of and/or with one value 
-        # Example: expression("or", exp1, exp2) where exp2 is None is changed to eType boolean and exp2 is removed 
-        if len(subExpsP) <= 1:
-            self.eType = "boolean"
-        else:
-            self.eType = eType
-        
-        self.subExpressions = subExpsP
-
-    def getFullExpression(self):
-        #print(f"{self.eType} {self.subExpressions}")
-        # This should only happen if the root expression is None, since otherwise the constructor will handle it 
-        if self.subExpressions == None:
-            return "None"
-        
-        # expressions of eType boolean are of type string, unless the type was changed in the constructor 
-        if self.eType == "boolean" and type(self.subExpressions[0]) is str:
-            return f"{self.subExpressions[0]}"
-        
-        # If eType is boolean, it's redunant to have it in the string since it will be obvious 
-        if self.eType != "boolean":
-            expression = f"{self.eType}"
-        else: 
-            expression = ""
-         
-        for subExpression in self.subExpressions:
-            expression += f"[{subExpression.getFullExpression()}]"
-        return expression
-
-    # TODO: Test this 
-    def getPrereqs(self):
-        prereqs = []
-        if self.subExpressions == None:
-            return prereqs
-        
-        if self.eType == "boolean":
-            prereqs.extend(self.subExpressions)
-        else:
-            for expression in self.subExpressions:
-                prereqs.extend(expression.getPrereqs())
-
-        return prereqs
-    
-    def fixBrackets(self):
-        if self.subExpressions == None:
-            return
-        if self.eType == "boolean":
-            if type(self.subExpressions[0]) is expression and self.subExpressions[0].eType == "boolean":
-                self.subExpressions = self.subExpressions[0].subExpressions
-                self.fixBrackets()
-            elif type(self.subExpressions[0]) is expression and (self.subExpressions[0].eType == "and" or self.subExpressions[0].eType == "or"):
-                self.eType = self.subExpressions[0].eType
-                self.subExpressions = self.subExpressions[0].subExpressions
-                self.fixBrackets()
-        elif self.eType == "or":
-            # first check if all the sub exps are or 
-            matching = True
-            for subExp in self.subExpressions:
-                if subExp.eType == "and":
-                    matching = False
-            # merge if matching
-            if matching == True:
-                newSubExp = []
-                for subExp in self.subExpressions:
-                    if subExp.eType == 'or':
-                        newSubExp.extend(subExp.subExpressions)
-                    else:
-                        newSubExp.append(subExp)
-                if self.subExpressions != newSubExp:
-                    self.subExpressions = newSubExp
-                    self.fixBrackets()
-        elif self.eType == "and":
-            newSubExp = []
-            for subExp in self.subExpressions:
-                if subExp.eType == "and":
-                    newSubExp.extend(subExp.subExpressions)
-                else:
-                    newSubExp.append(subExp)
-            if self.subExpressions != newSubExp:
-                self.subExpressions = newSubExp
-                self.fixBrackets()
-
-        for subExp in self.subExpressions:
-            if type(subExp) is expression:
-                subExp.fixBrackets()
-
-    # TODO: requires a list of completed courses  
-    def evaluateExpression(self):
-        if self.eType == "or":
-            return None
-        elif self.eType == "and":
-            return None
-        elif self.eType == "boolean":
-            return None
-
 # Gets the department using the last 2 words
 def getDepartment(code1In, lastWordIn, last2WordsIn):
     # print(f"code1In: {code1In} | lastWord: {lastWordIn} | last2: {last2WordsIn}")
@@ -325,9 +205,9 @@ def getDepartment(code1In, lastWordIn, last2WordsIn):
 def processBoolean(stringIn, code1In):
     # Fix "17a is not prerequisite to 17b" bs
     if "is not prerequisite to" in stringIn: 
-        return expression(None, [None])
+        return Expression(None, [None])
     elif "may be taken before" in stringIn:
-        return expression(None, [None])
+        return Expression(None, [None])
 
     prereqs = []
     if "is a prerequisite to" in stringIn:
@@ -338,7 +218,7 @@ def processBoolean(stringIn, code1In):
         prereqs.append(stringIn.split("is prerequisite for")[0])
     else:
         # Deal with prereqs like 201a-201c
-        words = re.split('\s|/|\(|\)', stringIn)
+        words = re.split('\s|\/|\(|\)', stringIn)
         for i in range(len(words)): 
             if len(words[i].split('-')) >= 2:
                 # Get last words. Setting them to EMPTY works because the prereq is all lower 
@@ -378,7 +258,7 @@ def processBoolean(stringIn, code1In):
         expressions = []
         for prereq in prereqs:
             expressions.append(createExpression(prereq, code1In))
-        return expression('and', expressions)
+        return Expression('and', expressions)
 
     # There is prob a better way to do this 
     # Put an array of tuples into courses, index 0 is the startIndex and index 2 is the text
@@ -388,10 +268,10 @@ def processBoolean(stringIn, code1In):
         courses.append((match.start(), match.group()))
 
     if courses == None or len(courses) == 0:
-        return expression(None, [None])
+        return Expression(None, [None])
     elif len(courses) > 1 or len(courses) == 0:
         print(f" What the fuck: {courses} |")
-        return expression(None, [None])
+        return Expression(None, [None])
     else: 
         regexIndex = courses[0][0]
         # gets the word before the course 
@@ -408,7 +288,7 @@ def processBoolean(stringIn, code1In):
         if len(nextWords) > 1:
             nextWord = stringIn[regexIndex:].split(" ")[1].strip()
             if nextWord.startswith("units"):
-                return expression(None, [None])
+                return Expression(None, [None])
 
         # Set prereq using codeIn
         course = courses[0][1].strip().strip("()")
@@ -418,12 +298,12 @@ def processBoolean(stringIn, code1In):
 
         # Strip stuff on the ends, just in case 
         fullPrereq = fullPrereq.strip(" .,;")
-        return expression("boolean", [fullPrereq])
+        return Expression("boolean", [fullPrereq])
 
 # Recursive method that creates the expression objects
 # It will continually go deeper into "and"/"or" statements until it gets to the raw prereqs 
 def createExpression(newPrereqIn, code1In):
-    # Key: word that shows up in prereqs | Value: type of operator 
+    # Key: word that shows up in prereqs | Value : type of operator 
     operators = {' and ':'and', ' plus ':'and', ' & ':'and', 'as well as ':'and',' or ':'or', ' and/or ':'or', '/':'or'}
 
     # check for chained operators
@@ -458,7 +338,7 @@ def createExpression(newPrereqIn, code1In):
             expressions = []
             for rawExpression in rawExpressions:
                 expressions.append(createExpression(rawExpression.strip(), code1In))
-            return expression(operators[operator], expressions)
+            return Expression(operators[operator], expressions)
     
     # Checks for non-chained in order of op precedence 
     for operator in operators:
@@ -471,7 +351,7 @@ def createExpression(newPrereqIn, code1In):
                 continue
             else: 
                 # Splits the string around the operator into two separate expressions 
-                return expression(operators[operator], [createExpression(newPrereqIn[:opIndex], code1In), createExpression(newPrereqIn[opIndex + len(operator):], code1In)])
+                return Expression(operators[operator], [createExpression(newPrereqIn[:opIndex], code1In), createExpression(newPrereqIn[opIndex + len(operator):], code1In)])
     
     # FOR DEBUGGING ONLY 
     if ' and ' in newPrereqIn or ' or ' in newPrereqIn:
@@ -484,12 +364,24 @@ def createExpression(newPrereqIn, code1In):
         expressions = []
         for prereq in commaSplit:
             expressions.append(processBoolean(prereq, code1In))
-        return expression("and", expressions)
+        return Expression("and", expressions)
     else:
         # Strip stuff on the ends, just in case 
         newPrereqIn = newPrereqIn.replace(PLACEHOLDER, "")
         newPrereqIn = newPrereqIn.strip(" .,;")
         return (processBoolean(newPrereqIn, code1In))
+
+def scSplit(prereqs):
+    # Deals with stupid awful ;
+    splitExpressions = []
+    for prereq in prereqs:
+        if prereq.find("; or") != -1:
+            splitExpressions.append(["or", scSplit(prereq.split("; or"))])
+        elif prereq.find(";") != -1:
+            splitExpressions.append(["and", scSplit(prereq.split(";"))])
+        else:
+            splitExpressions.append(["boolean", [prereq]])
+    return splitExpressions
 
 def processPrereqs():
     cursor.execute("SELECT * FROM prereqs_p where flag = true")
@@ -531,6 +423,7 @@ def processPrereqs():
                     skip = False
         splitPrereqs.append(prereq[lastIndex:])
 
+        # Deals with stupid awful ;
         splitExpressions = []
         for prereq in splitPrereqs:
             if prereq.find("; or") != -1:
@@ -551,6 +444,7 @@ def processPrereqs():
                         break
                 j += 1
 
+        # Processes the prereqs after the ; are dealt with 
         print(f"\nold: {entry[1]} \n", end="")
         finalPrereqs = []
         for splitExpression in splitExpressions:
@@ -562,14 +456,14 @@ def processPrereqs():
                 subFinalPrereqs.append(None)
             
             if splitExpression[0] == "and":
-                finalPrereqs.append(expression("and", subFinalPrereqs))
+                finalPrereqs.append(Expression("and", subFinalPrereqs))
             elif splitExpression[0] == "or":
-                finalPrereqs.append(expression("or", subFinalPrereqs))
+                finalPrereqs.append(Expression("or", subFinalPrereqs))
             else:
                 finalPrereqs.append(subFinalPrereqs[0])
         
         if len(finalPrereqs) > 0:
-            finalExpression = expression("and", finalPrereqs)
+            finalExpression = Expression("and", finalPrereqs)
         else:
             finalExpression = finalPrereqs[0]
 
