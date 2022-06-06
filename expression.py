@@ -1,3 +1,5 @@
+from pHelpers import removeEmptyElements
+
 # CLASS expression 
 # eType: stores the type of the relationship (and, or, boolean)
 # subExpressions: stores an array of expressions, either of type expression or str

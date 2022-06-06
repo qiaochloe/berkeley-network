@@ -33,8 +33,10 @@ from myConstants import IGNORE_ABBREVS
 from myConstants import PLACEHOLDER
 from myConstants import DELETE_PREREQ_SENTENCE
 from myConstants import ALT_CATEGORY_DICT
-
 from myConstants import ALPHA
+
+# Helper methods  
+from pHelpers import removeEmptyElements
 
 # Load env constants
 load_dotenv()
@@ -51,19 +53,12 @@ db = mysql.connector.connect(
     database=DB_NAME
 )
 
+# If debug is True, the "Flag?" prompt will appear after each prereq to check accuracy. Otherwise, the current flag will be kept
+debug = False
+
 # Fixes some issues, don't really understand why
 # Smth about lazy loading 
 cursor = db.cursor(buffered=True)
-
-# Processes arrays for removing prereqs
-def removeEmptyElements(array):
-    # Removes empty strings from an array 
-    #print(f"in {array}")
-    out = [i for i in array if i]
-    if len(out) == 0:
-        out = None
-    #print(f"out {out}")
-    return out
 
 # Deletes all entries with the given ID 
 def deleteID(idIn):
@@ -353,7 +348,7 @@ def createExpression(newPrereqIn, code1In):
                 # Splits the string around the operator into two separate expressions 
                 return Expression(operators[operator], [createExpression(newPrereqIn[:opIndex], code1In), createExpression(newPrereqIn[opIndex + len(operator):], code1In)])
     
-    # FOR DEBUGGING ONLY 
+    # FOR DEBUGGING ONLY (AND IT HAS NEVER BEEN CALLED WOOHOO)
     if ' and ' in newPrereqIn or ' or ' in newPrereqIn:
         print("This should have returned by now because it has and/or...")
         print(newPrereqIn)
@@ -381,6 +376,35 @@ def scSplit(prereqs):
             splitExpressions.append(["and", scSplit(prereq.split(";"))])
         else:
             splitExpressions.append(["boolean", [prereq]])
+
+    # remove if it has score in it
+    for i in range(len(splitExpressions)):
+        j = 0
+        while j < len(splitExpressions[i][1]):
+            for delPrereq in DELETE_PREREQ_SENTENCE:
+                if splitExpressions[i][1][j].find(delPrereq) != -1:
+                    del splitExpressions[i][1][j]
+                    j -= 1
+                    break
+            j += 1
+
+    # Processes the prereqs after the ; are dealt with 
+    finalPrereqs = []
+    for splitExpression in splitExpressions:
+        subFinalPrereqs = []
+        for newPrereq in splitExpression[1]:
+            print(f"in: {newPrereq} \n", end="")
+            subFinalPrereqs.append(createExpression(newPrereq, code1))
+        if len(splitExpression[1]) == 0:
+            subFinalPrereqs.append(None)
+        
+        if splitExpression[0] == "and":
+            finalPrereqs.append(Expression("and", subFinalPrereqs))
+        elif splitExpression[0] == "or":
+            finalPrereqs.append(Expression("or", subFinalPrereqs))
+        else:
+            finalPrereqs.append(subFinalPrereqs[0])
+    
     return splitExpressions
 
 def processPrereqs():
@@ -473,12 +497,15 @@ def processPrereqs():
 
         print(f"new: {finalExpression.getFullExpression()}")
 
-        flag = input("Flag? ")
+        if debug == True:
+            flag = input("Flag? ")
 
-        if flag == "":
+        if debug == True and flag == "":
             cursor.execute("UPDATE prereqs_p SET flag = false WHERE id = %s", (entry[0], ))
             db.commit()
-        # TODO: Actually save these until a table, once it's debugged 
+
+        cursor.execute("UPDATE prereqs_p SET prereq = %s WHERE id = %s", (finalExpression.getFullExpression(), entry[0]))
+        db.commit()
 
 # Unfinished: requires processing prereqs
 def mergeCourses():
@@ -496,5 +523,5 @@ deleteOnPrefix()
 addDivision()
 removePrefixes()
 removeSuffixes()
+#updateFields()
 processPrereqs()
-# updateFields()
