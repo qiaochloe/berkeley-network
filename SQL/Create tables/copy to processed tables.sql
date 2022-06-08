@@ -12,4 +12,7 @@ delete from prereqs_p;
 insert into prereqs_p
 select * from prereqs;
 
+update prereqs_p 
+set flag true;
+
 set sql_safe_updates = 1;

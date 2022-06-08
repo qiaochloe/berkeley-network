@@ -28,11 +28,7 @@
 # </div>
 
 from bs4 import BeautifulSoup
-
 import requests
-from helpers import dbConnect
-
-cursor, db = dbConnect()
 
 # Constants from constants.py
 from myConstants import LETTERS 
@@ -40,13 +36,19 @@ from myConstants import DIR_URL
 from myConstants import ROOT_URL 
 from myConstants import SCHOOL_YEAR 
 
+from helpers import dbConnect
+cursor, db = dbConnect()
+
+# Ex: "eth std c375" returns ["eth std c375", "eth std", "c375"]
+# This is messy but doing it with split() is way worse 
 def getCodes(fullCodeIn):
     code1 = fullCodeIn[:fullCodeIn.rindex(' ')].lower()
     code2 = fullCodeIn[fullCodeIn.rindex(' ') + 1:].lower()
     return [fullCodeIn, code1, code2]
 
 linksDict = {}
-# Get the directory page 
+
+# Get the directory page and create an array of department links
 dirReq = requests.get(DIR_URL)
 soup = BeautifulSoup(dirReq.content, 'html.parser')
 atoz = soup.find('div', {'id':'atozindex'})
@@ -73,11 +75,11 @@ for key in linksDict:
         for course in courses:
             # basicInfo in the parent of the spans with course info 
             basicInfo = course.find('h3', {'class':'courseblocktitle'})
-
-            # code1 is the prefix, such as AEROSPC and code2 is the actual code, such as 1A
             fullCode = basicInfo.find('span', {'class':'code'}).getText()
-            fullCode = fullCode.replace('\u00a0', ' ').lower()
             listings = [getCodes(fullCode)]
+
+            # Fixes rare unicode issue 
+            fullCode = fullCode.replace('\u00a0', ' ').lower()
 
             # title is not processed 
             title = basicInfo.find('span', {'class':'title'}).getText()
@@ -107,20 +109,17 @@ for key in linksDict:
                 description = descriptions[2]
             else:
                 description = descriptions[1]
-            #print(f"{fullCode}: {descriptions}")
 
             # Set variables to None to avoid problems later 
             prereqs = None
-            subject = None
             level = None
             grading = None
             final = None
 
-            # details has more advanced info such as prereqs 
+            # Details has more advanced info such as prereqs 
             sections = course.find('div', {'class':'coursedetails'}).findChildren('div', recursive=False)
             for section in sections:
                 details = section.findChildren('p', recursive=False)
-                heading = details[0].getText
 
                 for i in range(1, len(details)):
                     subHeading = details[i].find('strong').getText()
@@ -133,7 +132,6 @@ for key in linksDict:
                     # level = 'undergraduate'
                     elif subHeading == "Subject/Course Level:":
                         temp = details[i].getText()[len(subHeading) + 1:]
-                        subject = temp[:temp.rindex('/')].lower()
                         level = temp[temp.rindex('/') + 1:].lower()
                     # Example: 'Grading/Final exam status: Letter grade. Final exam required.'
                     # grading = 'letter grade' 
@@ -158,7 +156,7 @@ for key in linksDict:
                         for code in altCodes:
                             listings.append(getCodes(code))
             
-            print(f"fullCode: {fullCode} | title: {title} | description: {description[:10]} | units: {units} | subject: {subject} | level: {level} | fall: {fall} | spring: {spring} | summer: {summer} | grading: {grading} | final: {final} | listings: {listings}")
+            print(f"fullCode: {fullCode} | title: {title} | description: {description[:10]} | units: {units} | level: {level} | fall: {fall} | spring: {spring} | summer: {summer} | grading: {grading} | final: {final} | listings: {listings}")
             
             cursor.execute("""SELECT * FROM course_codes WHERE full_code=%s""", (fullCode,))
             entries = cursor.fetchall()
@@ -173,7 +171,6 @@ for key in linksDict:
                                 ON DUPLICATE KEY UPDATE description=%s, units=%s, level=%s, fall=%s, spring=%s, summer=%s, grading=%s, final=%s""", 
                                 (title, description, units, level, fall, spring, summer, grading, final,
                                 description, units, level, fall, spring, summer, grading, final))
-                #print(cursor.statement)
                 db.commit()
 
                 # The ID assigned by MYSQL to the last row, used to connect it to other tables 

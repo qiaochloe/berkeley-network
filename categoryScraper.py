@@ -1,29 +1,13 @@
 from bs4 import BeautifulSoup
 import requests
-from os import environ
-from dotenv import load_dotenv
-import mysql.connector
 
 # Constants from constants.py
 from myConstants import LETTERS 
 from myConstants import DIR_URL 
 from myConstants import ALT_CATEGORY_DICT
 
-# Load env constants
-load_dotenv()
-DB_NAME = environ.get("databaseName")
-HOST = environ.get("host")
-USER = environ.get("user")
-PASSWORD = environ.get("password")
-
-# Connect to DB
-db = mysql.connector.connect(
-    host=HOST,
-    user=USER,
-    password=PASSWORD,
-    database=DB_NAME
-)
-cursor = db.cursor()
+from helpers import dbConnect
+cursor, db = dbConnect()
 
 dirReq = requests.get(DIR_URL)
 soup = BeautifulSoup(dirReq.content, 'html.parser')

@@ -1,4 +1,4 @@
-from pHelpers import removeEmptyElements
+from helpers import removeEmptyElements
 
 # CLASS expression 
 # eType: stores the type of the relationship (and, or, boolean)

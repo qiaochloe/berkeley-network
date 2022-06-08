@@ -10,6 +10,8 @@
 
 # Running a single SQL query instead of a select and several updates/deletes is significantly quicker 
 # We should try to do so for some of the methods 
+# 
+# Could keep a copy of prereqs with capitalization preserved to determine if a abbrev is the end of a sentence 
 
 import re 
 
@@ -26,7 +28,6 @@ from myConstants import FIELDS_DICT
 from myConstants import IGNORE_ABBREVS
 from myConstants import PLACEHOLDER
 from myConstants import DELETE_PREREQ_SENTENCE
-from myConstants import ALT_CATEGORY_DICT
 from myConstants import ALPHA
 
 # Helper methods  
@@ -118,7 +119,7 @@ def removePrefixes():
         newCode2 = entry[2][1:]
         newFullCode = entry[1][:entry[1].index(' ')] + newCode2
 
-        print(f"Updating {entry[1]} to {newFullCode} for code id {entry[0]} (rmp)")
+        print(f"Updating {entry[1]} to {newFullCode} for code id {entry[0]} (rm prefix)")
         cursor.execute("UPDATE course_codes_p SET full_code = %s, code2 = %s WHERE course_code_id = %s", (newFullCode, newCode2, entry[0]))
         db.commit()
 
@@ -137,7 +138,7 @@ def removeSuffixes():
         newCode2 = entry[2][:entry[2].index(number) + len(number)]
         newFullCode = entry[1][:entry[1].index(number) + len(number)]
 
-        print(f"Updating {entry[1]} to {newFullCode} for code id {entry[0]} (rms)")
+        print(f"Updating {entry[1]} to {newFullCode} for code id {entry[0]} (rm suffix)")
         cursor.execute("UPDATE course_codes_p SET full_code = %s, code2 = %s WHERE course_code_id = %s", (newFullCode, newCode2, entry[0]))
         db.commit()
 
@@ -161,22 +162,175 @@ def updateFields():
             cursor.execute(query)
             db.commit()
 
-# Gets the department using the last 2 words
-def getDepartment(code1In, lastWordIn, last2WordsIn):
-    # print(f"code1In: {code1In} | lastWord: {lastWordIn} | last2: {last2WordsIn}")
-    # Check if other code should be used and if so, update fullPrereq
-    cursor.execute("SELECT * FROM categories")
-    codes = cursor.fetchall()
-    # Go and check for last two words find (prevents integrative biology from being recognized as biology)
-    for codeSet in codes:
-        newCodes = [codeSet[0], codeSet[1], codeSet[2]]
-        if last2WordsIn in newCodes:
-            return newCodes[1]
-    for codeSet in codes:
-        newCodes = [codeSet[0], codeSet[1], codeSet[2]]
-        if lastWordIn in newCodes:
-            return newCodes[1]
-    return code1In
+def processPrereqs():
+    cursor.execute("SELECT * FROM prereqs_p where flag = true")
+    entries = cursor.fetchall()
+    for entry in entries: 
+        prereq = entry[1] 
+        cursor.execute("SELECT code1 FROM course_codes_p WHERE id = %s", (entry[0],))
+
+        # Returns a tuple so the [0] is neccessary
+        code1 = cursor.fetchone()[0]
+
+        for delPre in DELETE_PREREQS:
+            prereq = prereq.replace(delPre, PLACEHOLDER)
+
+        # Split sentences 
+        # TODO: fix this mess 
+        splitPrereqs = []
+        lastIndex = 0
+        for i in range(len(prereq)):
+            skip = False
+            if prereq[i : i + 2] == ". ":
+                for abbrev in IGNORE_ABBREVS:
+                    for j in range(len(abbrev)):
+                        if abbrev[j] == ".":
+                            if prereq[i - j:i - j + len(abbrev)] == abbrev:
+                                # wtf am i doing 
+                                skip = True
+                                break
+                    if skip == True:
+                        break
+                if not skip:
+                    splitPrereqs.append(prereq[lastIndex:i])
+                    lastIndex = i + 2
+                    skip = False
+        splitPrereqs.append(prereq[lastIndex:])
+
+        finalPrereqs = scSplit(prereq, code1)
+
+        if len(finalPrereqs) > 0:
+            finalExpression = Expression("and", finalPrereqs)
+        else:
+            finalExpression = finalPrereqs[0]
+
+        print(f"pre-fix: {finalExpression.getFullExpression()}")
+
+        finalExpression.fixBrackets()
+
+        print(f"new: {finalExpression.getFullExpression()}")
+
+        if debug == True:
+            flag = input("Flag? ")
+
+        if debug == True and flag == "":
+            cursor.execute("UPDATE prereqs_p SET flag = false WHERE id = %s", (entry[0], ))
+            db.commit()
+
+        cursor.execute("UPDATE prereqs_p SET prereq = %s WHERE id = %s", (finalExpression.getFullExpression(), entry[0]))
+        db.commit()
+
+# Deals with stupid awful ;
+def scSplit(prereqs, code1In):
+    splitExpressions = []
+    for prereq in prereqs:
+        if prereq.find("; or") != -1:
+            splitExpressions.append(["or", scSplit(prereq.split("; or"))])
+        elif prereq.find(";") != -1:
+            splitExpressions.append(["and", scSplit(prereq.split(";"))])
+        else:
+            splitExpressions.append(["boolean", [prereq]])
+
+    # remove if it has score in it
+    for i in range(len(splitExpressions)):
+        j = 0
+        while j < len(splitExpressions[i][1]):
+            for delPrereq in DELETE_PREREQ_SENTENCE:
+                if splitExpressions[i][1][j].find(delPrereq) != -1:
+                    del splitExpressions[i][1][j]
+                    j -= 1
+                    break
+            j += 1
+
+    # Processes the prereqs after the ; are dealt with 
+    finalPrereqs = []
+    for splitExpression in splitExpressions:
+        subFinalPrereqs = []
+        for newPrereq in splitExpression[1]:
+            print(f"in: {newPrereq} \n", end="")
+            subFinalPrereqs.append(createExpression(newPrereq, code1In))
+        if len(splitExpression[1]) == 0:
+            subFinalPrereqs.append(None)
+        
+        if splitExpression[0] == "and":
+            finalPrereqs.append(Expression("and", subFinalPrereqs))
+        elif splitExpression[0] == "or":
+            finalPrereqs.append(Expression("or", subFinalPrereqs))
+        else:
+            finalPrereqs.append(subFinalPrereqs[0])
+    
+    return finalPrereqs
+
+# Recursive method that creates the expression objects
+# It will continually go deeper into "and"/"or" statements until it gets to the raw prereqs 
+def createExpression(newPrereqIn, code1In):
+    # Key: word that shows up in prereqs | Value : type of operator 
+    operators = {' and ':'and', ' plus ':'and', ' & ':'and', 'as well as ':'and',' or ':'or', ' and/or ':'or', '/':'or'}
+
+    # check for chained operators
+    for operator in operators:
+        # Stores the indivdual sections of a chained statement 
+        rawExpressions = []
+
+        # Find chained operator
+        opIndex = newPrereqIn.find(operator)
+        while opIndex != -1:
+
+            if newPrereqIn[opIndex - 1] == ",":
+                index = opIndex - 1
+
+                # Find a terminating character and add add section of the chain to rawExpressions
+                # regex = re.compile(".|and|or")
+                # match = regex.search(newPrereqIn[index + len(operator):])
+                # start = match.start()
+                # if start != 0:
+                #     rawExpressions.append(newPrereqIn[index + len(operator):index + len(operator) + start])
+                #     rawExpressions.append(newPrereqIn[index + len(operator) + start:])
+                # else:
+                #     rawExpressions.append(newPrereqIn[index + len(operator):])
+                rawExpressions.extend(newPrereqIn[index:].split(','))
+                rawExpressions.extend(newPrereqIn[:index].split(','))
+                break
+            else:
+                opIndex = newPrereqIn.find(operator, opIndex + 1)
+
+        # If a chained "and" was found, create expressions 
+        if len(rawExpressions) > 0:
+            expressions = []
+            for rawExpression in rawExpressions:
+                expressions.append(createExpression(rawExpression.strip(), code1In))
+            return Expression(operators[operator], expressions)
+    
+    # Checks for non-chained in order of op precedence 
+    for operator in operators:
+        opIndex = newPrereqIn.find(operator)
+        while opIndex != -1:
+            # Ignore chained operator (a, b, and/or c)
+            if newPrereqIn[opIndex - 1] == ",":
+                # Find the next operator if it exists 
+                opIndex = newPrereqIn.find(operator, opIndex + 1) 
+                continue
+            else: 
+                # Splits the string around the operator into two separate expressions 
+                return Expression(operators[operator], [createExpression(newPrereqIn[:opIndex], code1In), createExpression(newPrereqIn[opIndex + len(operator):], code1In)])
+    
+    # FOR DEBUGGING ONLY (AND IT HAS NEVER BEEN CALLED WOOHOO)
+    if ' and ' in newPrereqIn or ' or ' in newPrereqIn:
+        print("This should have returned by now because it has and/or...")
+        print(newPrereqIn)
+
+    # For stuff like anthro 1, bio 2
+    commaSplit = newPrereqIn.split(', ')
+    if len(commaSplit) > 1:
+        expressions = []
+        for prereq in commaSplit:
+            expressions.append(processBoolean(prereq, code1In))
+        return Expression("and", expressions)
+    else:
+        # Strip stuff on the ends, just in case 
+        newPrereqIn = newPrereqIn.replace(PLACEHOLDER, "")
+        newPrereqIn = newPrereqIn.strip(" .,;")
+        return (processBoolean(newPrereqIn, code1In))
 
 # Processes boolean strings so remove the junk and retrieve the courses
 def processBoolean(stringIn, code1In):
@@ -277,217 +431,21 @@ def processBoolean(stringIn, code1In):
         fullPrereq = fullPrereq.strip(" .,;")
         return Expression("boolean", [fullPrereq])
 
-# Recursive method that creates the expression objects
-# It will continually go deeper into "and"/"or" statements until it gets to the raw prereqs 
-def createExpression(newPrereqIn, code1In):
-    # Key: word that shows up in prereqs | Value : type of operator 
-    operators = {' and ':'and', ' plus ':'and', ' & ':'and', 'as well as ':'and',' or ':'or', ' and/or ':'or', '/':'or'}
-
-    # check for chained operators
-    for operator in operators:
-        # Stores the indivdual sections of a chained statement 
-        rawExpressions = []
-
-        # Find chained operator
-        opIndex = newPrereqIn.find(operator)
-        while opIndex != -1:
-
-            if newPrereqIn[opIndex - 1] == ",":
-                index = opIndex - 1
-
-                # Find a terminating character and add add section of the chain to rawExpressions
-                # regex = re.compile(".|and|or")
-                # match = regex.search(newPrereqIn[index + len(operator):])
-                # start = match.start()
-                # if start != 0:
-                #     rawExpressions.append(newPrereqIn[index + len(operator):index + len(operator) + start])
-                #     rawExpressions.append(newPrereqIn[index + len(operator) + start:])
-                # else:
-                #     rawExpressions.append(newPrereqIn[index + len(operator):])
-                rawExpressions.extend(newPrereqIn[index:].split(','))
-                rawExpressions.extend(newPrereqIn[:index].split(','))
-                break
-            else:
-                opIndex = newPrereqIn.find(operator, opIndex + 1)
-
-        # If a chained "and" was found, create expressions 
-        if len(rawExpressions) > 0:
-            expressions = []
-            for rawExpression in rawExpressions:
-                expressions.append(createExpression(rawExpression.strip(), code1In))
-            return Expression(operators[operator], expressions)
-    
-    # Checks for non-chained in order of op precedence 
-    for operator in operators:
-        opIndex = newPrereqIn.find(operator)
-        while opIndex != -1:
-            # Ignore chained operator (a, b, and/or c)
-            if newPrereqIn[opIndex - 1] == ",":
-                # Find the next operator if it exists 
-                opIndex = newPrereqIn.find(operator, opIndex + 1) 
-                continue
-            else: 
-                # Splits the string around the operator into two separate expressions 
-                return Expression(operators[operator], [createExpression(newPrereqIn[:opIndex], code1In), createExpression(newPrereqIn[opIndex + len(operator):], code1In)])
-    
-    # FOR DEBUGGING ONLY (AND IT HAS NEVER BEEN CALLED WOOHOO)
-    if ' and ' in newPrereqIn or ' or ' in newPrereqIn:
-        print("This should have returned by now because it has and/or...")
-        print(newPrereqIn)
-
-    # For stuff like anthro 1, bio 2
-    commaSplit = newPrereqIn.split(', ')
-    if len(commaSplit) > 1:
-        expressions = []
-        for prereq in commaSplit:
-            expressions.append(processBoolean(prereq, code1In))
-        return Expression("and", expressions)
-    else:
-        # Strip stuff on the ends, just in case 
-        newPrereqIn = newPrereqIn.replace(PLACEHOLDER, "")
-        newPrereqIn = newPrereqIn.strip(" .,;")
-        return (processBoolean(newPrereqIn, code1In))
-
-def scSplit(prereqs):
-    # Deals with stupid awful ;
-    splitExpressions = []
-    for prereq in prereqs:
-        if prereq.find("; or") != -1:
-            splitExpressions.append(["or", scSplit(prereq.split("; or"))])
-        elif prereq.find(";") != -1:
-            splitExpressions.append(["and", scSplit(prereq.split(";"))])
-        else:
-            splitExpressions.append(["boolean", [prereq]])
-
-    # remove if it has score in it
-    for i in range(len(splitExpressions)):
-        j = 0
-        while j < len(splitExpressions[i][1]):
-            for delPrereq in DELETE_PREREQ_SENTENCE:
-                if splitExpressions[i][1][j].find(delPrereq) != -1:
-                    del splitExpressions[i][1][j]
-                    j -= 1
-                    break
-            j += 1
-
-    # Processes the prereqs after the ; are dealt with 
-    finalPrereqs = []
-    for splitExpression in splitExpressions:
-        subFinalPrereqs = []
-        for newPrereq in splitExpression[1]:
-            print(f"in: {newPrereq} \n", end="")
-            subFinalPrereqs.append(createExpression(newPrereq, code1))
-        if len(splitExpression[1]) == 0:
-            subFinalPrereqs.append(None)
-        
-        if splitExpression[0] == "and":
-            finalPrereqs.append(Expression("and", subFinalPrereqs))
-        elif splitExpression[0] == "or":
-            finalPrereqs.append(Expression("or", subFinalPrereqs))
-        else:
-            finalPrereqs.append(subFinalPrereqs[0])
-    
-    return splitExpressions
-
-def processPrereqs():
-    cursor.execute("SELECT * FROM prereqs_p where flag = true")
-    entries = cursor.fetchall()
-    for entry in entries: 
-        prereq = entry[1] 
-        cursor.execute("SELECT code1 FROM course_codes_p WHERE id = %s", (entry[0],))
-
-        # Returns a tuple so the [0] is neccessary
-        code1 = cursor.fetchone()[0]
-
-        # Ignore blank prereqs
-        # TODO: Copy blank prereqs into the processed table 
-        if len(prereq) == 0:
-            continue
-
-        for delPre in DELETE_PREREQS:
-            prereq = prereq.replace(delPre, PLACEHOLDER)
-
-        # Split sentences 
-        # TODO: fix this mess 
-        splitPrereqs = []
-        lastIndex = 0
-        for i in range(len(prereq)):
-            skip = False
-            if prereq[i : i + 2] == ". ":
-                for abbrev in IGNORE_ABBREVS:
-                    for j in range(len(abbrev)):
-                        if abbrev[j] == ".":
-                            if prereq[i - j:i - j + len(abbrev)] == abbrev:
-                                # wtf am i doing 
-                                skip = True
-                                break
-                    if skip == True:
-                        break
-                if not skip:
-                    splitPrereqs.append(prereq[lastIndex:i])
-                    lastIndex = i + 2
-                    skip = False
-        splitPrereqs.append(prereq[lastIndex:])
-
-        # Deals with stupid awful ;
-        splitExpressions = []
-        for prereq in splitPrereqs:
-            if prereq.find("; or") != -1:
-                splitExpressions.append(["or", prereq.split("; or")])
-            elif prereq.find(";") != -1:
-                splitExpressions.append(["and", prereq.split(";")])
-            else:
-                splitExpressions.append(["boolean", [prereq]])
-        
-        # remove if it has score in it
-        for i in range(len(splitExpressions)):
-            j = 0
-            while j < len(splitExpressions[i][1]):
-                for delPrereq in DELETE_PREREQ_SENTENCE:
-                    if splitExpressions[i][1][j].find(delPrereq) != -1:
-                        del splitExpressions[i][1][j]
-                        j -= 1
-                        break
-                j += 1
-
-        # Processes the prereqs after the ; are dealt with 
-        print(f"\nold: {entry[1]} \n", end="")
-        finalPrereqs = []
-        for splitExpression in splitExpressions:
-            subFinalPrereqs = []
-            for newPrereq in splitExpression[1]:
-                print(f"in: {newPrereq} \n", end="")
-                subFinalPrereqs.append(createExpression(newPrereq, code1))
-            if len(splitExpression[1]) == 0:
-                subFinalPrereqs.append(None)
-            
-            if splitExpression[0] == "and":
-                finalPrereqs.append(Expression("and", subFinalPrereqs))
-            elif splitExpression[0] == "or":
-                finalPrereqs.append(Expression("or", subFinalPrereqs))
-            else:
-                finalPrereqs.append(subFinalPrereqs[0])
-        
-        if len(finalPrereqs) > 0:
-            finalExpression = Expression("and", finalPrereqs)
-        else:
-            finalExpression = finalPrereqs[0]
-
-        print(f"pre-fix: {finalExpression.getFullExpression()}")
-
-        finalExpression.fixBrackets()
-
-        print(f"new: {finalExpression.getFullExpression()}")
-
-        if debug == True:
-            flag = input("Flag? ")
-
-        if debug == True and flag == "":
-            cursor.execute("UPDATE prereqs_p SET flag = false WHERE id = %s", (entry[0], ))
-            db.commit()
-
-        cursor.execute("UPDATE prereqs_p SET prereq = %s WHERE id = %s", (finalExpression.getFullExpression(), entry[0]))
-        db.commit()
+# Gets the department using the last 2 words
+def getDepartment(code1In, lastWordIn, last2WordsIn):
+    # Check if other code should be used and if so, update fullPrereq
+    cursor.execute("SELECT * FROM categories")
+    codes = cursor.fetchall()
+    # Go and check for last two words first (prevents integrative biology from being recognized as biology)
+    for codeSet in codes:
+        newCodes = [codeSet[0], codeSet[1], codeSet[2]]
+        if last2WordsIn in newCodes:
+            return newCodes[1]
+    for codeSet in codes:
+        newCodes = [codeSet[0], codeSet[1], codeSet[2]]
+        if lastWordIn in newCodes:
+            return newCodes[1]
+    return code1In
 
 # Unfinished: requires processing prereqs
 def mergeCourses():
@@ -505,5 +463,5 @@ deleteOnPrefix()
 addDivision()
 removePrefixes()
 removeSuffixes()
-#updateFields()
+updateFields()
 processPrereqs()

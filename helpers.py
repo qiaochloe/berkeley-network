@@ -1,4 +1,4 @@
-
+# Returns cursor and db objects to connect to the DB
 def dbConnect():
     from dotenv import load_dotenv
     from os import environ
