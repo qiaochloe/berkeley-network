@@ -11,12 +11,6 @@
 # Running a single SQL query instead of a select and several updates/deletes is significantly quicker 
 # We should try to do so for some of the methods 
 
-from cmath import exp
-from ntpath import split
-import string
-import mysql.connector
-from dotenv import load_dotenv
-from os import environ
 import re 
 
 # Expression class 
@@ -36,22 +30,10 @@ from myConstants import ALT_CATEGORY_DICT
 from myConstants import ALPHA
 
 # Helper methods  
-from pHelpers import removeEmptyElements
+from helpers import removeEmptyElements
+from helpers import dbConnect
 
-# Load env constants
-load_dotenv()
-DB_NAME = environ.get("databaseName")
-HOST = environ.get("host")
-USER = environ.get("user")
-PASSWORD = environ.get("password")
-
-# Connect to DB
-db = mysql.connector.connect(
-    host=HOST,
-    user=USER,
-    password=PASSWORD,
-    database=DB_NAME
-)
+cursor, db = dbConnect()
 
 # If debug is True, the "Flag?" prompt will appear after each prereq to check accuracy. Otherwise, the current flag will be kept
 debug = False

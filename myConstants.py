@@ -5,7 +5,7 @@ ALPHA = string.ascii_lowercase
 
 # SCRAPER CONSTANTS
 # Remove letters to skip them 
-LETTERS = 'def'
+LETTERS = 'abcdefghijklmnopqrstuvwxyz'
 DIR_URL = "http://guide.berkeley.edu/courses/"
 ROOT_URL = "http://guide.berkeley.edu"
 SCHOOL_YEAR = 2021

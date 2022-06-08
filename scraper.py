@@ -1,6 +1,3 @@
-# TODO
-# Remove Subject 
-
 # COURSE DIRECTORY EXAMPLE:
 # <div id="atozindex">
 #   <h2 class="letternav-head" id="A">...</h2>
@@ -30,32 +27,12 @@
 #   </div>
 # </div>
 
-from asyncio import constants
 from bs4 import BeautifulSoup
 
-from time import sleep
-from os import environ
 import requests
+from helpers import dbConnect
 
-from dotenv import load_dotenv
-
-import mysql.connector
-
-# Load env constants
-load_dotenv()
-DB_NAME = environ.get("databaseName")
-HOST = environ.get("host")
-USER = environ.get("user")
-PASSWORD = environ.get("password")
-
-# Connect to DB
-db = mysql.connector.connect(
-    host=HOST,
-    user=USER,
-    password=PASSWORD,
-    database=DB_NAME
-)
-cursor = db.cursor()
+cursor, db = dbConnect()
 
 # Constants from constants.py
 from myConstants import LETTERS 
