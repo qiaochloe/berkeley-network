@@ -42,6 +42,7 @@ cursor, db = dbConnect()
 # Ex: "eth std c375" returns ["eth std c375", "eth std", "c375"]
 # This is messy but doing it with split() is way worse 
 def getCodes(fullCodeIn):
+    print(fullCodeIn)
     code1 = fullCodeIn[:fullCodeIn.rindex(' ')].lower()
     code2 = fullCodeIn[fullCodeIn.rindex(' ') + 1:].lower()
     return [fullCodeIn, code1, code2]
@@ -76,10 +77,10 @@ for key in linksDict:
             # basicInfo in the parent of the spans with course info 
             basicInfo = course.find('h3', {'class':'courseblocktitle'})
             fullCode = basicInfo.find('span', {'class':'code'}).getText()
-            listings = [getCodes(fullCode)]
 
             # Fixes rare unicode issue 
             fullCode = fullCode.replace('\u00a0', ' ').lower()
+            listings = [getCodes(fullCode)]
 
             # title is not processed 
             title = basicInfo.find('span', {'class':'title'}).getText()
