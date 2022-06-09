@@ -1,0 +1,7 @@
+*.DS_store
+
+*.env
+
+# Jupyter Notebooks
+*.ipynb
+*.ipynb_checkpoints
