@@ -1,54 +1,38 @@
-# TO DO 
+# TODO 
+# Prereqs stuff: 
+# african 1, 2, and 3 
+# fixBrackets by checking if sub types are the same type
+# add a check to see if the course exists 
+#
 # Merge multi-term courses (A-C suffixes)
 # Merge courses and labs (L suffix)
 # Merge one/two year courses (stated in grading) 
 
 # Running a single SQL query instead of a select and several updates/deletes is significantly quicker 
 # We should try to do so for some of the methods 
+# 
+# Could keep a copy of prereqs with capitalization preserved to determine if a abbrev is the end of a sentence 
 
-from ntpath import split
-import mysql.connector
-from dotenv import load_dotenv
-from os import environ
 import re 
 
-# Constants from constants.py
-from myConstants import DELETE_CODES 
-from myConstants import DELETE_PREFIXES 
-from myConstants import REMOVE_PREFIXES 
-from myConstants import REMOVE_SUFFIXES 
-from myConstants import DELETE_PREREQS
-from myConstants import FIELDS_DICT 
-from myConstants import IGNORE_ABBREVS
-from myConstants import PLACEHOLDER
+# Expression class 
+from expression import Expression
 
-from myConstants import ALPHA
+# Constants from myConstants.py
+from myConstants import DELETE_CODES, DELETE_PREREQ_SENTENCE, DELETE_PREFIXES, REMOVE_PREFIXES, REMOVE_SUFFIXES, DELETE_PREREQS, FIELDS_DICT, IGNORE_ABBREVS, \
+                        PLACEHOLDER, DELETE_PREREQ_SENTENCE, ALPHA
 
-# Load env constants
-load_dotenv()
-DB_NAME = environ.get("databaseName")
-HOST = environ.get("host")
-USER = environ.get("user")
-PASSWORD = environ.get("password")
+# Helper methods  
+from helpers import removeEmptyElements, dbConnect
 
-# Connect to DB
-db = mysql.connector.connect(
-    host=HOST,
-    user=USER,
-    password=PASSWORD,
-    database=DB_NAME
-)
-cursor = db.cursor()
+cursor, db = dbConnect()
 
-# Processes arrays for removing prereqs
-def removeEmptyElements(array):
-    # Removes empty strings from an array 
-    #print(f"in {array}")
-    out = [i for i in array if i]
-    if len(out) == 0:
-        out = None
-    #print(f"out {out}")
-    return out
+# If debug is True, the "Flag?" prompt will appear after each prereq to check accuracy. Otherwise, the current flag will be kept
+debug = False
+
+# Fixes some issues, don't really understand why
+# Smth about lazy loading 
+cursor = db.cursor(buffered=True)
 
 # Deletes all entries with the given ID 
 def deleteID(idIn):
@@ -94,7 +78,7 @@ def addDivision():
         # Removes all letters from the beginning and end of the string 
         number = int(entry[1].strip(ALPHA))
         division = None
-        if 99 >= number >= 1:
+        if 99 >= number:
             division = 'lower'
         elif 199 >= number >= 100: 
             division ='upper'
@@ -102,7 +86,7 @@ def addDivision():
             division = 'graduate'
         elif 499 >= number >= 300:
             division = 'profesional'
-        elif 699 >= number >= 500:
+        elif number >= 500:
             print(f"Deleting {entry[1]} because of its division")
             deleteID(entry[0])
             continue
@@ -126,7 +110,7 @@ def removePrefixes():
         newCode2 = entry[2][1:]
         newFullCode = entry[1][:entry[1].index(' ')] + newCode2
 
-        print(f"Updating {entry[1]} to {newFullCode} for code id {entry[0]} (rmp)")
+        print(f"Updating {entry[1]} to {newFullCode} for code id {entry[0]} (rm prefix)")
         cursor.execute("UPDATE course_codes_p SET full_code = %s, code2 = %s WHERE course_code_id = %s", (newFullCode, newCode2, entry[0]))
         db.commit()
 
@@ -145,7 +129,7 @@ def removeSuffixes():
         newCode2 = entry[2][:entry[2].index(number) + len(number)]
         newFullCode = entry[1][:entry[1].index(number) + len(number)]
 
-        print(f"Updating {entry[1]} to {newFullCode} for code id {entry[0]} (rms)")
+        print(f"Updating {entry[1]} to {newFullCode} for code id {entry[0]} (rm suffix)")
         cursor.execute("UPDATE course_codes_p SET full_code = %s, code2 = %s WHERE course_code_id = %s", (newFullCode, newCode2, entry[0]))
         db.commit()
 
@@ -169,91 +153,111 @@ def updateFields():
             cursor.execute(query)
             db.commit()
 
-# CLASS expression 
-# eType: stores the type of the relationship (and, or, boolean)
-# subExpressions: stores an array of expressions, either of type expression or str
-# __init__(eType, subExpressions): the constructor. deals with None values and converting to boolean if neccessary 
-# getFullExpression(): returns the whole expression as a string 
-# evaluateExpression(): TODO determines whether the requirement for the class have been met 
-class expression:
-    def __init__(self, eType, subExpressions):
-        
-        # Goes through all subExpressions and removes any where the Type is none 
-        # Iterating backwards prevents the index from "skipping" when an element is removed 
-        for i in range(len(subExpressions) - 1, -1, -1):
-            if type(subExpressions[i]) is expression and subExpressions[i].eType == None:
-                del subExpressions[i]
+# The central method for prereqs, calls other methods and connects to db 
+def processPrereqs():
+    cursor.execute("SELECT * FROM prereqs_p where flag = true")
+    entries = cursor.fetchall()
+    for entry in entries: 
+        prereq = entry[1] 
+        cursor.execute("SELECT code1 FROM course_codes_p WHERE id = %s", (entry[0],))
 
-        # Removes any blank elements in the array, and returns None if all are removed
-        subExpsP = removeEmptyElements(subExpressions)
+        # Returns a tuple so the [0] is neccessary
+        code1 = cursor.fetchone()[0]
 
-        # Will only happen if the array is all None values
-        # Expressions of eType == None are removed by parent expression objects, however if this expression is the root, then, 
-        # Expressions of subExpressisons == None are returned as None in getFullExpression()
-        if subExpsP == None:
-            self.eType = None
-            self.subExpressions = None
-            return 
-        
-        # Prevents having an eType of and/or with one value 
-        # Example: expression("or", exp1, exp2) where exp2 is None is changed to eType boolean and exp2 is removed 
-        if len(subExpsP) <= 1:
-            self.eType = "boolean"
+        # Remove some common phrases from prereq
+        # With the newer code, a lot of it is technically not neccessary
+        for delPre in DELETE_PREREQS:
+            prereq = prereq.replace(delPre, PLACEHOLDER)
+
+        # Split sentences, but first remove periods from abbrevs 
+        for abbrev in IGNORE_ABBREVS:
+            prereq = prereq.replace(abbrev, abbrev.replace(".", ""))
+        splitPrereqs = prereq.split(". ")
+
+        # Deal with semicolon relationships 
+        finalPrereqs = scSplit(splitPrereqs, code1)
+
+        # If there are multiple, give them an and relationship 
+        if len(finalPrereqs) > 0:
+            finalExpression = Expression("and", finalPrereqs)
         else:
-            self.eType = eType
-        
-        self.subExpressions = subExpsP
+            finalExpression = finalPrereqs[0]
 
-    def getFullExpression(self):
-        #print(f"{self.eType} {self.subExpressions}")
-        # This should only happen if the root expression is None, since otherwise the constructor will handle it 
-        if self.subExpressions == None:
-            return "None"
-        
-        # expressions of eType boolean are of type string, unless the type was changed in the constructor 
-        if self.eType == "boolean" and type(self.subExpressions[0]) is str:
-            return f"{self.subExpressions[0]}"
-        
-        # If eType is boolean, it's redunant to have it in the string since it will be obvious 
-        if self.eType != "boolean":
-            expression = f"{self.eType}"
-        else: 
-            expression = ""
-        
-        # TODO: Fix issue with excess brackets for booleans, which occurs because they are sometime nested multiple levels deep
-        # The easiest way would be to create a new method that cleans up these boolean chains  
-        for subExpression in self.subExpressions:
-            expression += f"[{subExpression.getFullExpression()}]"
-        return expression
+        print(f"pre-fix: {finalExpression.getFullExpression()}")
 
-    # TODO: requires a list of completed courses  
-    def evaluateExpression(self):
-        if self.eType == "or":
-            return None
-        elif self.eType == "and":
-            return None
-        elif self.eType == "boolean":
-            return None
+        # Fixes various issues with duplicate unneccessary brackets created by creation algo 
+        finalExpression.fixBrackets()
+
+        print(f"new: {finalExpression.getFullExpression()}\n")
+
+        # For debugging. If debug is set to True, prereqs must be reviewed and flagged if incorrect 
+        if debug == True:
+            flag = input("Flag? ")
+        if debug == True and flag == "":
+            cursor.execute("UPDATE prereqs_p SET flag = false WHERE id = %s", (entry[0], ))
+            db.commit()
+
+        # Commits through update, making changes to the code reflected if ran again 
+        #cursor.execute("UPDATE prereqs_p SET prereq = %s WHERE id = %s", (finalExpression.getFullExpression(), entry[0]))
+        #db.commit()
+
+# Deals with stupid awful ;
+def scSplit(prereqs, code1In):
+    # Recursively add elements to the splitExpressions array
+    splitExpressions = []
+    for prereq in prereqs:
+        if prereq.find("; or") != -1:
+            splitExpressions.append(["or", scSplit(prereq.split("; or"), code1In)])
+        elif prereq.find(";") != -1:
+            splitExpressions.append(["and", scSplit(prereq.split(";"), code1In)])
+        else:
+            remove = False
+            for delPrereq in DELETE_PREREQ_SENTENCE:
+                if prereq.find(delPrereq) != -1:
+                    remove = True
+            if not remove:
+                splitExpressions.append(["boolean", [prereq]])
+
+    # for expression in splitExpressions:
+    #     j = 0
+    #     while j < len(expression[1]):
+    #         for delPrereq in DELETE_PREREQ_SENTENCE:
+    #             if expression[1][j].find(delPrereq) != -1:
+    #                 del expression[1][j]
+    #                 j -= 1
+    #                 break
+    #         j += 1
+
+    # Remove entire prereq, mostly if it's talking about a score
+    # for expression in splitExpressions:
+    #     for delPrereq in DELETE_PREREQ_SENTENCE:
+    #         expression[1] = [x for x in expression[1] if x.find(delPrereq) == -1]
+
+    # Processes the prereqs after the ; are dealt with 
+    finalPrereqs = []
+    for expression in splitExpressions:
+        if len(expression[1]) == 0:
+            continue
+
+        if expression[0] == "boolean":
+            print(f"in: {expression[1][0]} \n", end="")
+            finalPrereqs.append(createExpression(expression[1][0], code1In))
+        if expression[0] == "and":
+            finalPrereqs.append(Expression("and", expression[1]))
+        elif expression[0] == "or":
+            finalPrereqs.append(Expression("or", expression[1]))
+    
+    if len(finalPrereqs) == 0:
+        return [Expression(None, [None])]
+    return finalPrereqs
 
 # Recursive method that creates the expression objects
-# It will continually go deeper into "and"/"or" statements until it gets to the raw prereqs 
-def createExpression(newPrereqIn):
-    # Key: word that shows up in prereqs | Value: type of operator 
-    operators = {' and ':'and', ' plus ':'and', ' or ':'or'}
-    # Checks for non-chained in order of op precedence 
-    for operator in operators:
+# It will continually go deeper into "and"/"or" statements until it gets to the raw boolean prereqs 
+def createExpression(newPrereqIn, code1In):
+    # Key: word that shows up in prereqs | Value : type of operator 
+    operators = {' and ':'and', ' plus ':'and', ' & ':'and', 'as well as ':'and',' or ':'or', ' and/or ':'or', '/':'or'}
 
-        opIndex = newPrereqIn.find(operator) 
-        while opIndex != -1:
-            # Ignore chained operator (a, b, and/or c)
-            if newPrereqIn[opIndex - 1] == ",":
-                # Find the next operator if it exists 
-                opIndex = newPrereqIn.find(operator, opIndex + 1) 
-                continue
-            else: 
-                # Splits the string around the operator into two separate expressions 
-                return expression(operators[operator], [createExpression(newPrereqIn[:opIndex]), createExpression(newPrereqIn[opIndex + len(operator):])])
-    
+    # check for chained operators
     for operator in operators:
         # Stores the indivdual sections of a chained statement 
         rawExpressions = []
@@ -266,25 +270,16 @@ def createExpression(newPrereqIn):
                 index = opIndex - 1
 
                 # Find a terminating character and add add section of the chain to rawExpressions
-                regex = re.compile(".|and|or")
-                match = regex.search(newPrereqIn[index + len(operator):])
-                start = match.start()
-                if start != 0:
-                    rawExpressions.append(newPrereqIn[index + len(operator):index + len(operator) + start])
-                else:
-                    rawExpressions.append(newPrereqIn[index + len(operator):])
-                
-                # Go through the string backwards, saving each section into rawExpressions
-                lastIndex = index
-                for i in range(index - 1, 0, -1):
-                    # Finding and/or signals the end of the chain 
-                    if newPrereqIn[i - 3 : i] == "and" or newPrereqIn[i - 2 : i] == "or":
-                        break
-                    # Finding a comma signals the end of a section 
-                    if newPrereqIn[i] == ",":
-                        rawExpressions.append(newPrereqIn[i + 1 : lastIndex])
-                        lastIndex = i
-                rawExpressions.append(newPrereqIn[:lastIndex])
+                # regex = re.compile(".|and|or")
+                # match = regex.search(newPrereqIn[index + len(operator):])
+                # start = match.start()
+                # if start != 0:
+                #     rawExpressions.append(newPrereqIn[index + len(operator):index + len(operator) + start])
+                #     rawExpressions.append(newPrereqIn[index + len(operator) + start:])
+                # else:
+                #     rawExpressions.append(newPrereqIn[index + len(operator):])
+                rawExpressions.extend(newPrereqIn[index:].split(','))
+                rawExpressions.extend(newPrereqIn[:index].split(','))
                 break
             else:
                 opIndex = newPrereqIn.find(operator, opIndex + 1)
@@ -293,70 +288,154 @@ def createExpression(newPrereqIn):
         if len(rawExpressions) > 0:
             expressions = []
             for rawExpression in rawExpressions:
-                expressions.append(createExpression(rawExpression))
-            return expression(operators[operator], expressions)
+                expressions.append(createExpression(rawExpression.strip(), code1In))
+            return Expression(operators[operator], expressions)
     
-    # FOR DEBUGGING ONLY 
+    # Checks for non-chained in order of op precedence 
+    for operator in operators:
+        opIndex = newPrereqIn.find(operator)
+        while opIndex != -1:
+            # Ignore chained operator (a, b, and/or c)
+            if newPrereqIn[opIndex - 1] == ",":
+                # Find the next operator if it exists 
+                opIndex = newPrereqIn.find(operator, opIndex + 1) 
+                continue
+            else: 
+                # Splits the string around the operator into two separate expressions 
+                return Expression(operators[operator], [createExpression(newPrereqIn[:opIndex], code1In), createExpression(newPrereqIn[opIndex + len(operator):], code1In)])
+    
+    # FOR DEBUGGING ONLY (AND IT HAS NEVER BEEN CALLED WOOHOO)
     if ' and ' in newPrereqIn or ' or ' in newPrereqIn:
         print("This should have returned by now because it has and/or...")
         print(newPrereqIn)
 
-    # Strip stuff on the ends, just in case 
-    newPrereqIn = newPrereqIn.replace(PLACEHOLDER, "")
-    newPrereqIn = newPrereqIn.strip(" .,;")
+    # For stuff like anthro 1, bio 2
+    commaSplit = newPrereqIn.split(', ')
+    if len(commaSplit) > 1:
+        expressions = []
+        for prereq in commaSplit:
+            expressions.append(processBoolean(prereq, code1In))
+        return Expression("and", expressions)
+    else:
+        # Strip stuff on the ends, just in case 
+        newPrereqIn = newPrereqIn.replace(PLACEHOLDER, "")
+        newPrereqIn = newPrereqIn.strip(" .,;")
+        return (processBoolean(newPrereqIn, code1In))
 
-    # If code reaches here, it means there are no and/or remaining so it must be boolean 
-    # TODO: process boolean expressions further 
-    return expression("boolean", [newPrereqIn])
+# Processes boolean strings so remove the junk and retrieve the courses
+def processBoolean(stringIn, code1In):
+    # Fix "17a is not prerequisite to 17b" bs
+    if "is not prerequisite to" in stringIn: 
+        return Expression(None, [None])
+    elif "may be taken before" in stringIn:
+        return Expression(None, [None])
 
-def processPrereqs():
-    cursor.execute("SELECT * FROM prereqs_p")
-    entries = cursor.fetchall()
-    for entry in entries: 
-        prereq = entry[1] 
+    prereqs = []
+    if "is a prerequisite to" in stringIn:
+        prereqs.append(stringIn.split("is a prerequisite to")[0])
+    elif "is prerequisite to" in stringIn:
+        prereqs.append(stringIn.split("is prerequisite to")[0])
+    elif "is prerequisite for" in stringIn:
+        prereqs.append(stringIn.split("is prerequisite for")[0])
+    else:
+        # Deal with prereqs like 201a-201c
+        words = re.split('\s|\/|\(|\)', stringIn)
+        for i in range(len(words)): 
+            if len(words[i].split('-')) >= 2:
+                # Get last words. Setting them to EMPTY works because the prereq is all lower 
+                lastWord = "EMPTY"
+                last2Words = "EMPTY"
+                # gets the word before the course 
+                if len(words[:i]) > 0:
+                    lastWord = words[i-1]
+                if len(words[:i-1]) > 0:
+                    last2Words = words[i-2] + " " + lastWord
+                department = getDepartment(code1In, lastWord, last2Words)
 
-        # Ignore blank prereqs
-        # TODO: Copy blank prereqs into the processed table 
-        if len(prereq) == 0:
-            continue
-
-        for delPre in DELETE_PREREQS:
-            prereq = prereq.replace(delPre, PLACEHOLDER)
-
-        # Split sentences 
-        # TODO: fix this mess 
-        splitPrereqs = []
-        lastIndex = 0
-        for i in range(len(prereq)):
-            skip = False
-            if prereq[i : i + 2] == ". ":
-                for abbrev in IGNORE_ABBREVS:
-                    for j in range(len(abbrev)):
-                        if abbrev[j] == ".":
-                            if prereq[i - j:i - j + len(abbrev)] == abbrev:
-                                # wtf am i doing 
-                                skip = True
-                                break
-                    if skip == True:
+                courses = words[i].split('-')
+                if len(courses) == 2:
+                    courseCodeMatch = re.search(r"(^|\s|\(|/)[a-z]*[0-9][0-9]*", courses[0])
+                    if courseCodeMatch == None:
                         break
-                if not skip:
-                    splitPrereqs.extend(prereq[lastIndex:i].split(';'))
-                    lastIndex = i
-                    skip = False
-        splitPrereqs.extend(prereq[lastIndex:].split(';'))
+                    courseCode = courseCodeMatch.group()
+                    # Get range of letters 
+                    slice = ALPHA[ALPHA.find(courses[0][-1]) : ALPHA.find(courses[1][-1]) + 1]
+                    print(lastWord)
+                    for letter in slice:
+                        if "concurrent" in stringIn:
+                            prereqs.append(department + " " + courseCode.strip().strip("()") + letter + " conc")
+                        else:
+                            prereqs.append(department + " " + courseCode.strip().strip("()") + letter)
+                    break
+                else:
+                    for course in courses:
+                        if "concurrent" in stringIn:
+                            prereqs.append(department + " " + course.strip().strip("()") + " conc")
+                        else:
+                            prereqs.append(department + " " + course.strip().strip("()"))
 
-        print(f"old: {entry[1]} | in: {prereq} |", end="")
-        finalPrereqs = []
-        for newPrereq in splitPrereqs:
-            finalPrereqs.append(createExpression(newPrereq))
+    
+    if len(prereqs) > 0:
+        expressions = []
+        for prereq in prereqs:
+            expressions.append(createExpression(prereq, code1In))
+        return Expression('and', expressions)
+
+    # There is prob a better way to do this 
+    # Put an array of tuples into courses, index 0 is the startIndex and index 2 is the text
+    courses = []
+    # Matches number that are surrounded by letters then are surrounded by spaces or the end/start of string
+    for match in re.finditer(r"(^|\s|\(|/)[a-z]*[0-9][0-9]*[a-z]*($|\s|\))", stringIn):
+        courses.append((match.start(), match.group()))
+
+    if courses == None or len(courses) == 0:
+        return Expression(None, [None])
+    elif len(courses) > 1 or len(courses) == 0:
+        print(f" What the fuck: {courses} |")
+        return Expression(None, [None])
+    else: 
+        regexIndex = courses[0][0]
+        # gets the word before the course 
+        lastWord = "EMPTY"
+        last2Words = "EMPTY"
+        words = re.split("\s|/|\(|\)", stringIn[:regexIndex])
+        if len(words) >= 1:
+            lastWord = words[-1].strip()
+        if len(words) >= 2:
+            last2Words = words[-2].strip() + " " + lastWord
         
-        if len(finalPrereqs) > 1:
-            finalExpression = expression("and", finalPrereqs)
-        else:
-            finalExpression = expression("boolean", finalPrereqs)
-        
-        print(f" new: {finalExpression.getFullExpression()}")
-        # TODO: Actually save these until a table, once it's debugged 
+        nextWords = stringIn[regexIndex:].split(" ")
+        # Ignore the number if the next word is units
+        if len(nextWords) > 1:
+            nextWord = stringIn[regexIndex:].split(" ")[1].strip()
+            if nextWord.startswith("units"):
+                return Expression(None, [None])
+
+        # Set prereq using codeIn
+        course = courses[0][1].strip().strip("()")
+        if "concurrent" in stringIn:
+            course += " conc"
+        fullPrereq = getDepartment(code1In, lastWord, last2Words) + " " + course
+
+        # Strip stuff on the ends, just in case 
+        fullPrereq = fullPrereq.strip(" .,;")
+        return Expression("boolean", [fullPrereq])
+
+# Gets the department using the last 2 words
+def getDepartment(code1In, lastWordIn, last2WordsIn):
+    # Check if other code should be used and if so, update fullPrereq
+    cursor.execute("SELECT * FROM categories")
+    codes = cursor.fetchall()
+    # Go and check for last two words first (prevents integrative biology from being recognized as biology)
+    for codeSet in codes:
+        newCodes = [codeSet[0], codeSet[1], codeSet[2]]
+        if last2WordsIn in newCodes:
+            return newCodes[1]
+    for codeSet in codes:
+        newCodes = [codeSet[0], codeSet[1], codeSet[2]]
+        if lastWordIn in newCodes:
+            return newCodes[1]
+    return code1In
 
 # Unfinished: requires processing prereqs
 def mergeCourses():
@@ -369,10 +448,10 @@ def mergeCourses():
             #if code2[-1] in ['a', 'b', 'c']:
 
 # Call all processing methods 
-# deleteOnCode()
-# deleteOnPrefix()
-# addDivision()
-# removePrefixes()
-# removeSuffixes()
+deleteOnCode()
+deleteOnPrefix()
+addDivision()
+removePrefixes()
+removeSuffixes()
+updateFields()
 processPrereqs()
-# updateFields()

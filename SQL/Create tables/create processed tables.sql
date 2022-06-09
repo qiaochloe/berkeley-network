@@ -27,5 +27,6 @@ CREATE TABLE `courses_p` (
  DROP TABLE IF EXISTS `prereqs_p`;
  CREATE TABLE `prereqs_p` (
    `id` int NOT NULL,
-   `prereq` varchar(256) NOT NULL
+   `prereq` varchar(2560) NOT NULL,
+   `flag` boolean DEFAULT true
  );

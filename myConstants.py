@@ -3,12 +3,16 @@
 import string 
 ALPHA = string.ascii_lowercase
 
-# SCRAPER.PY CONSTANTS
+# SCRAPER CONSTANTS
 # Remove letters to skip them 
 LETTERS = 'abcdefghijklmnopqrstuvwxyz'
 DIR_URL = "http://guide.berkeley.edu/courses/"
 ROOT_URL = "http://guide.berkeley.edu"
 SCHOOL_YEAR = 2021
+
+# Official short code : alt code
+# Cannot currently handle multiple alternates 
+ALT_CATEGORY_DICT = {"biology":"bio", "bio eng":"bioe", "compsci":"cs", "mec eng":"me", "el eng":"ee", "civ eng":"ce"}
 
 # PROCESSER.PY CONSTANTS
 # Codes to be deleted, regardless of suffix or prefix 
@@ -70,9 +74,12 @@ DELETE_PREREQS = [
                     'satisfaction of the reading and composition requirement',
                     'reading and composition requirement',
                     'those set by instructor',
-                    'determined by offering'
+                    'determined by offering',
+                    'regulations set by college of letters and science'
                 ]
 
-IGNORE_ABBREVS = ['ph.d'] 
+DELETE_PREREQ_SENTENCE = ['score', 'though neither is required']
+
+IGNORE_ABBREVS = ['ph.d', 'ph.d.', 'e.g.'] 
 
 PLACEHOLDER = 'PLACEHOLDER'
